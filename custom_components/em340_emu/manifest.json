@@ -1,0 +1,12 @@
+{
+  "domain": "em340_emu",
+  "name": "EM340 Modbus Emulator",
+  "codeowners": [],
+  "config_flow": true,
+  "documentation": "https://github.com/merbanan/homeassistant_em340_emu",
+  "integration_type": "hub",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/merbanan/homeassistant_em340_emu/issues",
+  "requirements": ["em340-emu @ git+https://github.com/merbanan/homeassistant_em340_emu.git@v0.1.0#subdirectory=."],
+  "version": "0.1.0"
+}

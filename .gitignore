@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.venv/
+
+# Third-party copyrighted reference PDFs (Carlo Gavazzi protocol spec,
+# Wallbox installation guide, Energiforetagen branschrekommendation) --
+# cited by name/source in README.md, not redistributed here.
+*.pdf
