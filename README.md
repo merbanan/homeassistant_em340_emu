@@ -34,7 +34,7 @@ src/em340_emu/            the library + CLI
   registers.py              EM340 register map -> MeterState
   modbus.py                 Modbus PDU (FC03/04/06/08) handling
   framing.py                 RTU-over-TCP and Modbus-TCP (MBAP) framing
-  server.py                  asyncio TCP listener (the "gateway-facing" side)
+  server.py                  asyncio TCP client dialing out to the gateway (the "gateway-facing" side)
   sources.py                 flat-dict-of-readings -> MeterState
   parameters.py               canonical P1/HAN parameter list (key/unit/label/OBIS)
   mqtt_source.py               MQTT-subscribed live-value source
@@ -48,10 +48,16 @@ docs/                       (reserved for register map notes/extensions)
 
 ## How it talks to the gateway
 
-An RS485-to-Ethernet gateway sitting between the Wallbox and this emulator
-is expected to be configured as a **TCP client**, dialing *into* whatever
-host/port `em340-emu serve` is listening on, and forwarding whatever the
-Wallbox (the RS485 master) sends. Two wire formats are supported:
+`em340-emu serve` dials *out* to the RS485-to-Ethernet gateway sitting
+between it and the Wallbox, rather than listening for the gateway to dial
+in -- every gateway actually used with this project has turned out to be
+a TCP server in its own right (check the gateway's own web UI for
+something like "Work Mode: TCP Server"). `--host`/`--port` are the
+gateway's own address, and `--connect-retry`/`--retry-interval` control
+how long and how often it keeps trying to reach it, both on first start
+and if the connection later drops (e.g. after a gateway reboot). Two wire
+formats are supported for whatever the gateway forwards from the Wallbox
+(the RS485 master):
 
 * **`rtu`** -- the gateway forwards raw Modbus RTU bytes (address, function
   code, data, 2-byte CRC) unmodified. This is the common "transparent
@@ -172,23 +178,24 @@ testing without a broker.
 
 ```bash
 # Default: live values from MQTT (192.168.200.142, topic "energy-meter/#"),
-# with auth if the broker requires it:
-em340-emu serve --host 0.0.0.0 --port 502 --mqtt-username ha_mqtt --mqtt-password ha_mqtt
+# with auth if the broker requires it. --host/--port are the gateway's own
+# address (serve dials out to it -- see "How it talks to the gateway" above):
+em340-emu serve --host 192.168.200.7 --port 12345 --mqtt-username ha_mqtt --mqtt-password ha_mqtt
 
 # A different broker/topic:
-em340-emu serve --mqtt-host 10.0.0.5 --mqtt-topic han/readings \
+em340-emu serve --host 192.168.200.7 --port 12345 --mqtt-host 10.0.0.5 --mqtt-topic han/readings \
                  --mqtt-username user --mqtt-password secret
 
 # Try it with no external data source at all -- a small self-contained
 # simulated EV-charging load ramp on L1:
-em340-emu serve --host 0.0.0.0 --port 502 --demo
+em340-emu serve --host 192.168.200.7 --port 12345 --demo
 
 # Point at a JSON file that something else keeps up to date instead of
 # MQTT; reloaded automatically whenever its mtime changes:
-em340-emu serve --values /var/lib/em340-emu/values.json --framing rtu
+em340-emu serve --host 192.168.200.7 --port 12345 --values /var/lib/em340-emu/values.json --framing rtu
 
 # Watch every known P1/HAN parameter as it's broadcast over MQTT, without
-# running the Modbus listener at all -- handy for checking the payload
+# running the Modbus emulator at all -- handy for checking the payload
 # format actually matches what em340-emu expects:
 em340-emu view-readings
 
@@ -206,12 +213,10 @@ em340-emu sniff --host 192.168.200.7 --port 12345
 em340-emu sniff --host 192.168.200.7 --port 12345 --duration 30  # stop listening after 30s instead of Ctrl+C
 em340-emu sniff --host 192.168.200.7 --port 12345 --connect-retry 600  # keep trying to connect for up to 10 minutes
 
-# Some gateways are configured as a TCP *server* themselves (the opposite
-# of what `serve` assumes: that the gateway dials out to us). For those,
-# `sniff --emulate` dials out the same way plain sniffing does, but
-# actually answers as an EM340 over that connection instead of only
-# logging -- useful for testing end-to-end against a charger without
-# needing to reconfigure the gateway's own TCP mode:
+# `sniff --emulate` is the same dial-out connection as plain sniffing, but
+# actually answers as an EM340 over it instead of only logging -- useful
+# for testing end-to-end against a charger without running the full `serve`
+# command (no MQTT/fail-safe, just the register responses):
 em340-emu sniff --host 192.168.200.7 --port 12345 --emulate --unit-id 2
 em340-emu sniff --host 192.168.200.7 --port 12345 --emulate --unit-id 2 --demo  # with a changing demo load too
 ```
@@ -271,8 +276,12 @@ command above re-enables it just for the HA suite.
 
 `custom_components/em340_emu/` maps existing Home Assistant sensor
 entities (from whatever already reads your P1/HAN port -- a DSMR reader, an
-ESPHome HAN-to-MQTT bridge, etc.) onto the emulator, and runs the listener
-directly inside Home Assistant's own event loop (no separate process).
+ESPHome HAN-to-MQTT bridge, etc.) onto the emulator, and runs it directly
+inside Home Assistant's own event loop (no separate process). It always
+dials *out* to your RS485-to-Ethernet gateway rather than listening for it
+to dial in, since every gateway actually used with this project has
+turned out to be a TCP server in its own right (check the gateway's own
+web UI for something like "Work Mode: TCP Server").
 
 | Field group | H1-port parameters (Bilaga 3) |
 | --- | --- |
@@ -293,30 +302,20 @@ your Home Assistant config directory, `pip install -e /path/to/modbus-emu`
 into the same Python environment yourself, then restart.
 
 Either way, once installed: add the integration from Settings -> Devices
-& Services. The config flow first asks for the **connection mode**:
+& Services. The config flow asks for:
 
-* **Listen** (the original default) -- the gateway dials *into* Home
-  Assistant. Host/port below is the address/port this integration binds
-  and listens on.
-* **Connect** -- Home Assistant dials *out* to the gateway instead. Use
-  this when the gateway itself runs as a TCP server (many RS485-to-
-  Ethernet converters do out of the box -- check the gateway's own web UI
-  for something like "Work Mode: TCP Server"). Host/port below is then the
-  *gateway's* address/port, and "connect retry"/"retry interval" control
-  how long and how often this integration keeps trying to reach it (both
-  on first setup and if the connection later drops, e.g. after the
-  gateway reboots).
+* **Gateway address / port** -- the RS485-to-Ethernet gateway's own
+  address, since this integration dials out to it.
+* **Connect retry / retry interval** -- how long and how often to keep
+  retrying the connection, both on first setup and if it later drops
+  (e.g. to catch a gateway that only powers up when a charger starts).
+* **Unit id / framing** -- the Modbus slave id to answer as, and the wire
+  framing (auto-detect works for most gateways).
 
-Getting this backwards throws `OSError: could not bind on any address` at
-setup (attempting to listen on what's actually the gateway's own address)
--- if you hit that, switch to Connect mode from the integration's
-"Configure" option.
-
-After that: unit id/framing, then walks through mapping each parameter to
-a sensor entity (all optional -- leave a field blank to leave that value
-at its default), then the fail-safe settings (see below). All of these,
-including the connection mode, can be changed later from the integration's
-"Configure" option.
+Then it walks through mapping each parameter to a sensor entity (all
+optional -- leave a field blank to leave that value at its default), then
+the fail-safe settings (see below). All of these can be changed later
+from the integration's "Configure" option.
 
 The component has been exercised against a real Home Assistant instance
 (via `pytest-homeassistant-custom-component`, see "Running the tests"
@@ -324,6 +323,41 @@ above) -- config flow, entity-mapping/unit-conversion, live state updates,
 the embedded Modbus server actually answering a request over the wire, and
 the fail-safe engaging/ramping/recovering are all covered by that suite,
 not just syntax-checked.
+
+### Observing it: entities and a dashboard card
+
+The integration creates a device (named after the config entry) with a
+sensor entity for every value it serves out over Modbus -- per-phase
+voltage/current/active+reactive power/power factor, system totals,
+frequency, and cumulative energy -- plus three diagnostic sensors:
+"Modbus requests from gateway", "Modbus responses answered", and "Entity
+value updates received", so you can confirm the Wallbox is actually
+polling and your P1/HAN mapping is actually receiving updates without
+digging through debug logs. All of these update live (no polling delay
+worse than ~2 seconds).
+
+The quickest way to see them: go to the integration's device page
+(Settings -> Devices & Services -> EM340 Modbus Emulator -> the device) --
+every entity is listed there automatically, no dashboard setup needed.
+
+To pin a summary to a dashboard instead, add a manual card with something
+like:
+
+```yaml
+type: entities
+title: EM340 Emulator
+entities:
+  - entity: sensor.em340_emulator_192_168_200_7_12345_active_power_total
+  - entity: sensor.em340_emulator_192_168_200_7_12345_voltage_l1
+  - entity: sensor.em340_emulator_192_168_200_7_12345_current_l1
+  - entity: sensor.em340_emulator_192_168_200_7_12345_energy_active_import
+  - entity: sensor.em340_emulator_192_168_200_7_12345_modbus_requests_from_gateway
+  - entity: sensor.em340_emulator_192_168_200_7_12345_entity_value_updates_received
+```
+
+The exact entity ids depend on your config entry's title (gateway
+host:port) -- check Settings -> Devices & Services -> Entities, filter by
+"em340", and adjust the list above to match.
 
 ### Releasing an update
 
@@ -388,7 +422,7 @@ debug logging and watch exactly which registers get read, in what order,
 and whether any come back as an exception:
 
 ```bash
-em340-emu serve --log-level DEBUG
+em340-emu serve --host 192.168.200.7 --port 12345 --log-level DEBUG
 ```
 
 ```

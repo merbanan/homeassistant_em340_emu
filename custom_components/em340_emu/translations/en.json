@@ -3,15 +3,14 @@
     "step": {
       "user": {
         "title": "EM340 emulator connection",
-        "description": "\"Listen\" mode: the gateway dials into Home Assistant -- host/port below is where this integration listens. \"Connect\" mode: this integration dials out to the gateway instead -- host/port below is the gateway's own address. Use \"Connect\" if your gateway's own configuration shows it running as a TCP server (many RS485-to-Ethernet converters do, out of the box).",
+        "description": "This integration dials out to your RS485-to-Ethernet gateway (most converters run as a TCP server out of the box) and answers as an EM340 meter over that connection.",
         "data": {
-          "connection_mode": "Connection mode",
-          "host": "Listen address (listen mode) / gateway address (connect mode)",
-          "port": "Listen port (listen mode) / gateway port (connect mode)",
+          "host": "Gateway address",
+          "port": "Gateway port",
           "unit_id": "Modbus unit/slave id",
           "framing": "Gateway framing",
-          "connect_retry": "Connect mode: keep retrying the connection for up to this many seconds (e.g. to catch a gateway that only powers up when a charger starts)",
-          "retry_interval": "Connect mode: seconds between connection attempts"
+          "connect_retry": "Keep retrying the connection for up to this many seconds (e.g. to catch a gateway that only powers up when a charger starts)",
+          "retry_interval": "Seconds between connection attempts"
         }
       },
       "voltages_currents": {
@@ -75,15 +74,14 @@
     "step": {
       "init": {
         "title": "EM340 emulator connection",
-        "description": "\"Listen\" mode: the gateway dials into Home Assistant -- host/port below is where this integration listens. \"Connect\" mode: this integration dials out to the gateway instead -- host/port below is the gateway's own address.",
+        "description": "This integration dials out to your RS485-to-Ethernet gateway and answers as an EM340 meter over that connection.",
         "data": {
-          "connection_mode": "Connection mode",
-          "host": "Listen address (listen mode) / gateway address (connect mode)",
-          "port": "Listen port (listen mode) / gateway port (connect mode)",
+          "host": "Gateway address",
+          "port": "Gateway port",
           "unit_id": "Modbus unit/slave id",
           "framing": "Gateway framing",
-          "connect_retry": "Connect mode: keep retrying the connection for up to this many seconds",
-          "retry_interval": "Connect mode: seconds between connection attempts"
+          "connect_retry": "Keep retrying the connection for up to this many seconds",
+          "retry_interval": "Seconds between connection attempts"
         }
       },
       "voltages_currents": {

@@ -7,6 +7,7 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PORT, EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_track_state_change_event
 
 from em340_emu import MeterState, ModbusGatewayServer
@@ -15,26 +16,40 @@ from em340_emu.sources import apply_values
 
 from .const import (
     CONF_CONNECT_RETRY,
-    CONF_CONNECTION_MODE,
     CONF_FAILSAFE_IMPORT_LIMIT_W,
     CONF_FAILSAFE_TIMEOUT,
     CONF_FRAMING,
     CONF_MAPPING,
     CONF_RETRY_INTERVAL,
     CONF_UNIT_ID,
-    CONNECTION_MODE_CONNECT,
     DEFAULT_CONNECT_RETRY,
-    DEFAULT_CONNECTION_MODE,
     DEFAULT_FAILSAFE_IMPORT_LIMIT_W,
     DEFAULT_FAILSAFE_TIMEOUT,
     DEFAULT_RETRY_INTERVAL,
     DOMAIN,
     normalize_unit,
+    signal_update,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[str] = []
+PLATFORMS: list[str] = ["sensor"]
+
+# How often sensor entities refresh from the shared MeterState/counters even
+# absent a fresh entity update -- e.g. so the fail-safe's ramp is visible
+# live, not just when a mapped P1/HAN entity happens to change.
+SENSOR_REFRESH_INTERVAL = 2.0
+
+
+class _Counter:
+    """Plain-int counters are immutable, so a nested closure can't mutate
+    one in the enclosing scope without `nonlocal` -- this small mutable
+    holder lets sensor.py read the live value by reference instead."""
+
+    value: int = 0
+
+    def increment(self) -> None:
+        self.value += 1
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -49,30 +64,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         port=data[CONF_PORT],
         framing=data[CONF_FRAMING],
     )
-    connection_mode = data.get(CONF_CONNECTION_MODE, DEFAULT_CONNECTION_MODE)
-    connection_task: asyncio.Task | None = None
-    if connection_mode == CONNECTION_MODE_CONNECT:
-        # The gateway is itself a TCP server (confirmed via a real
-        # gateway's own web UI during this project's development, where
-        # the opposite "listen" assumption doesn't work at all -- it can't
-        # bind to the gateway's own address). Dial out instead, retrying
-        # (and reconnecting if it later drops) in the background.
-        connection_task = asyncio.ensure_future(
-            server.serve_as_client(
-                connect_retry=data.get(CONF_CONNECT_RETRY, DEFAULT_CONNECT_RETRY),
-                retry_interval=data.get(CONF_RETRY_INTERVAL, DEFAULT_RETRY_INTERVAL),
-            )
+    # Every gateway actually used with this project has turned out to be a
+    # TCP server in its own right, so we always dial out to it rather than
+    # listen (see server.py's module docstring) -- retrying (and
+    # reconnecting if it later drops) in the background.
+    connection_task = asyncio.ensure_future(
+        server.serve_as_client(
+            connect_retry=data.get(CONF_CONNECT_RETRY, DEFAULT_CONNECT_RETRY),
+            retry_interval=data.get(CONF_RETRY_INTERVAL, DEFAULT_RETRY_INTERVAL),
         )
-        _LOGGER.info(
-            "EM340 emulator connecting out to %s:%s (unit id %s, framing=%s)",
-            data[CONF_HOST], data[CONF_PORT], data[CONF_UNIT_ID], data[CONF_FRAMING],
-        )
-    else:
-        await server.start()
-        _LOGGER.info(
-            "EM340 emulator listening on %s:%s (unit id %s, framing=%s)",
-            data[CONF_HOST], data[CONF_PORT], data[CONF_UNIT_ID], data[CONF_FRAMING],
-        )
+    )
+    _LOGGER.info(
+        "EM340 emulator connecting out to %s:%s (unit id %s, framing=%s)",
+        data[CONF_HOST], data[CONF_PORT], data[CONF_UNIT_ID], data[CONF_FRAMING],
+    )
 
     monitor = FailSafeMonitor(
         state,
@@ -89,6 +94,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     monitor_task = asyncio.ensure_future(monitor.run_forever())
 
     entity_to_field = {entity_id: field for field, entity_id in mapping.items()}
+    entity_update_counter = _Counter()
+    signal = signal_update(entry.entry_id)
 
     def _apply_entity_state(field: str, value_str: str, unit: str | None) -> None:
         try:
@@ -97,6 +104,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             return
         apply_values(state, {field: normalize_unit(value, unit)})
         monitor.touch()
+        entity_update_counter.increment()
+        _LOGGER.debug("entity update #%d: %s = %s", entity_update_counter.value, field, value)
+        async_dispatcher_send(hass, signal)
 
     @callback
     def _handle_entity_change(event: Event) -> None:
@@ -119,11 +129,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     else:
         _LOGGER.warning("EM340 emulator entry %s has no entities mapped; all values will read 0", entry.entry_id)
 
+    async def _periodic_refresh() -> None:
+        # Keeps sensors (voltage/power/etc., and the fail-safe's ramp) live
+        # even between entity updates -- e.g. while ramping towards the
+        # fail-safe limit, or just to reflect the Modbus request counters.
+        while True:
+            await asyncio.sleep(SENSOR_REFRESH_INTERVAL)
+            async_dispatcher_send(hass, signal)
+
+    refresh_task = asyncio.ensure_future(_periodic_refresh())
+
     async def _async_stop(_event: Event | None = None) -> None:
         monitor_task.cancel()
-        if connection_task is not None:
-            connection_task.cancel()
-        await server.stop()
+        connection_task.cancel()
+        refresh_task.cancel()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         "server": server,
@@ -131,8 +150,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "monitor": monitor,
         "monitor_task": monitor_task,
         "connection_task": connection_task,
+        "refresh_task": refresh_task,
+        "entity_update_counter": entity_update_counter,
         "unsub": unsub,
     }
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, _async_stop))
     entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
     return True
@@ -143,14 +165,14 @@ async def _async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    if not await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
+        return False
     runtime = hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
     if runtime is None:
         return True
     if runtime["unsub"] is not None:
         runtime["unsub"]()
     runtime["monitor_task"].cancel()
-    connection_task = runtime.get("connection_task")
-    if connection_task is not None:
-        connection_task.cancel()
-    await runtime["server"].stop()
+    runtime["connection_task"].cancel()
+    runtime["refresh_task"].cancel()
     return True

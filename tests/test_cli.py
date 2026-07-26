@@ -3,7 +3,7 @@ import asyncio
 import pytest
 
 from em340_emu import codec
-from em340_emu.cli import _format_readings_table, _run_sniff, build_parser
+from em340_emu.cli import _format_readings_table, _run_serve, _run_sniff, build_parser
 
 
 def test_format_readings_table_shows_values_and_placeholders():
@@ -22,7 +22,7 @@ def test_format_readings_table_flags_unknown_keys():
 
 def test_serve_defaults_to_mqtt_source():
     parser = build_parser()
-    args = parser.parse_args(["serve"])
+    args = parser.parse_args(["serve", "--host", "192.168.200.7", "--port", "12345"])
     assert args.mqtt_host == "192.168.200.142"
     assert args.mqtt_topic == "energy-meter/#"
     assert args.no_mqtt is False
@@ -30,6 +30,14 @@ def test_serve_defaults_to_mqtt_source():
     assert args.values is None
     assert args.unit_id == 1
     assert args.strict is False  # courtesy mode (RegisterMap default) is the default
+    assert args.connect_retry == 300.0
+    assert args.retry_interval == 2.0
+
+
+def test_serve_requires_host_and_port():
+    parser = build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["serve"])
 
 
 def test_sniff_emulate_strict_flag_defaults_off():
@@ -41,16 +49,63 @@ def test_sniff_emulate_strict_flag_defaults_off():
 
 def test_serve_failsafe_defaults():
     parser = build_parser()
-    args = parser.parse_args(["serve"])
+    args = parser.parse_args(["serve", "--host", "192.168.200.7", "--port", "12345"])
     assert args.failsafe_timeout == 60.0
     assert args.failsafe_import_limit == 11000.0
 
 
 def test_serve_failsafe_overrides():
     parser = build_parser()
-    args = parser.parse_args(["serve", "--failsafe-timeout", "0", "--failsafe-import-limit", "7000"])
+    args = parser.parse_args(
+        ["serve", "--host", "192.168.200.7", "--port", "12345", "--failsafe-timeout", "0", "--failsafe-import-limit", "7000"]
+    )
     assert args.failsafe_timeout == 0.0
     assert args.failsafe_import_limit == 7000.0
+
+
+async def test_serve_dials_out_and_answers():
+    # serve now dials out too (like sniff --emulate), since every gateway
+    # this project has actually seen is itself a TCP server -- see
+    # server.py's module docstring.
+    body = bytes([1, 0x03, 0x00, 0x00, 0x00, 0x02])
+    request = body + codec.crc16_bytes(body)
+    received: list = []
+
+    async def _handler(reader, writer):
+        writer.write(request)
+        await writer.drain()
+        response = await asyncio.wait_for(reader.read(64), timeout=2)
+        received.append(response)
+        writer.close()
+
+    gateway = await asyncio.start_server(_handler, "127.0.0.1", 0)
+    port = gateway.sockets[0].getsockname()[1]
+    try:
+        args = build_parser().parse_args(
+            [
+                "serve", "--host", "127.0.0.1", "--port", str(port), "--no-mqtt",
+                "--connect-retry", "2", "--retry-interval", "0.1",
+            ]
+        )
+        task = asyncio.create_task(_run_serve(args))
+        try:
+            for _ in range(100):
+                if received:
+                    break
+                await asyncio.sleep(0.02)
+        finally:
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+    finally:
+        gateway.close()
+        await gateway.wait_closed()
+
+    assert len(received) >= 1
+    response = received[0]
+    assert response[0] == 1 and response[1] == 0x03
+    raw = int.from_bytes(response[5:7], "big") << 16 | int.from_bytes(response[3:5], "big")
+    assert raw == 2300  # MeterState() defaults l1.voltage to 230.0V
 
 
 def test_view_readings_parses_mqtt_overrides():

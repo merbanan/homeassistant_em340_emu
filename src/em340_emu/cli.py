@@ -88,8 +88,10 @@ async def _run_serve(args: argparse.Namespace) -> None:
         framing=args.framing,
         registers=RegisterMap(strict=args.strict),
     )
-    await server.start()
-    log.info("listening on %s:%d (unit id %d, framing=%s)", args.host, args.port, args.unit_id, args.framing)
+    log.info(
+        "connecting to gateway %s:%d (unit id %d, framing=%s, retrying up to %.0fs if needed)",
+        args.host, args.port, args.unit_id, args.framing, args.connect_retry,
+    )
 
     monitor = FailSafeMonitor(
         state,
@@ -103,7 +105,10 @@ async def _run_serve(args: argparse.Namespace) -> None:
     else:
         log.info("fail-safe disabled (--failsafe-timeout <= 0)")
 
-    tasks = [asyncio.create_task(server.serve_forever()), asyncio.create_task(monitor.run_forever())]
+    tasks = [
+        asyncio.create_task(server.serve_as_client(connect_retry=args.connect_retry, retry_interval=args.retry_interval)),
+        asyncio.create_task(monitor.run_forever()),
+    ]
     mqtt_source: MqttSource | None = None
     if args.demo:
         tasks.append(asyncio.create_task(_demo_simulation(state, args.poll_interval, monitor)))
@@ -131,7 +136,9 @@ async def _run_serve(args: argparse.Namespace) -> None:
     finally:
         if mqtt_source is not None:
             mqtt_source.stop()
-        await server.stop()
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 def _cmd_serve(args: argparse.Namespace) -> None:
@@ -311,12 +318,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="em340-emu", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
 
-    serve = sub.add_parser("serve", help="start the Modbus listener towards the RS485-to-Ethernet gateway")
-    serve.add_argument("--host", default="0.0.0.0", help="address to listen on (default: 0.0.0.0)")
-    serve.add_argument("--port", type=int, default=502, help="TCP port to listen on (default: 502)")
+    serve = sub.add_parser("serve", help="connect to the RS485-to-Ethernet gateway and serve as an EM340")
+    serve.add_argument("--host", required=True, help="gateway host/IP to connect to")
+    serve.add_argument("--port", type=int, required=True, help="gateway TCP port")
     serve.add_argument("--unit-id", type=int, default=1, help="Modbus slave/unit id to answer as (default: 1)")
     serve.add_argument("--framing", choices=["auto", "rtu", "tcp"], default="auto", help="wire framing used by the gateway (default: auto-detect per connection)")
     serve.add_argument("--strict", action="store_true", help="raise a Modbus exception for any unimplemented register instead of the default courtesy-mode 0 (see RegisterMap docstring)")
+    serve.add_argument("--connect-retry", type=float, default=300.0, help="keep retrying the connection for up to this many seconds, e.g. to catch a gateway that only powers up when a charger starts (default: 300 = 5 minutes)")
+    serve.add_argument("--retry-interval", type=float, default=2.0, help="seconds between connection attempts (default: 2.0)")
     serve.add_argument("--values", help="path to a JSON file with live readings, hot-reloaded on change")
     serve.add_argument("--poll-interval", type=float, default=1.0, help="seconds between checks of --values / demo ticks (default: 1.0)")
     serve.add_argument("--demo", action="store_true", help="ignore --values/mqtt and run a self-contained demo load pattern")

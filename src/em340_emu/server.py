@@ -1,20 +1,17 @@
-"""Asyncio TCP listener/client that emulates an EM340 towards an
-RS485-to-Ethernet gateway.
+"""Asyncio TCP client that emulates an EM340 towards an RS485-to-Ethernet
+gateway.
 
-Two gateway arrangements exist in practice, and this supports both:
+Every gateway actually used with this project has turned out to be a TCP
+*server* in its own right (confirmed via a real gateway's own web UI,
+which showed "Work Mode: TCP Server") -- so this dials *out* to the
+gateway via serve_as_client(), retrying the connection (including
+reconnecting if it later drops) rather than listening for the gateway to
+dial in. An earlier version also supported a listen mode for the opposite
+arrangement; it was removed once real hardware confirmed dial-out is the
+only arrangement this project needs.
 
-* The gateway dials *into* us (its "TCP client" mode) -- use start()/
-  serve_forever(), which listens. This was this project's original
-  assumption.
-* The gateway is itself a TCP *server* (common for gateways configured
-  this way out of the box, confirmed via a real gateway's own web UI
-  during this project's development) -- use serve_as_client(), which
-  dials out instead, retrying the connection (including reconnecting if
-  it later drops) rather than listening.
-
-Either way, the actual framing/dispatch logic in _handle_client() is
-identical; it only needs a reader/writer pair; see framing.py for the two
-supported wire formats.
+See framing.py for the two supported wire formats; _handle_client() does
+the actual framing/dispatch and only needs a reader/writer pair.
 """
 from __future__ import annotations
 
@@ -85,25 +82,20 @@ class ModbusGatewayServer:
         self.port = port
         self.framing = framing
         self.registers = registers or RegisterMap()
-        self._server: asyncio.AbstractServer | None = None
-
-    async def start(self) -> None:
-        self._server = await asyncio.start_server(self._handle_client, self.host, self.port)
-
-    async def serve_forever(self) -> None:
-        if self._server is None:
-            await self.start()
-        assert self._server is not None
-        async with self._server:
-            await self._server.serve_forever()
+        # Simple running totals for observability (e.g. the HA integration's
+        # diagnostic sensors): every request seen (any unit id, including
+        # ones filtered out below) vs. every one actually answered.
+        self.request_count = 0
+        self.response_count = 0
 
     async def serve_as_client(self, connect_retry: float = 300.0, retry_interval: float = 2.0) -> None:
         """Dial out to self.host:self.port and serve requests over that
-        connection, instead of listening -- for a gateway that is itself a
-        TCP server (the opposite of start()'s assumption). Runs forever:
-        reconnects (retrying for up to connect_retry seconds each time)
-        whenever the connection drops, e.g. after a gateway reboot. Meant
-        to be run as a background task and cancelled to stop it.
+        connection, for a gateway that is itself a TCP server. Runs
+        forever: reconnects (retrying for up to connect_retry seconds each
+        time) whenever the connection drops, e.g. after a gateway reboot.
+        Meant to be run as a background task and cancelled to stop it --
+        cancellation propagates into _handle_client(), whose finally block
+        closes the connection, so no separate stop/close call is needed.
         """
         def _log_retry(attempt: int, exc: OSError, remaining: float) -> None:
             log.warning(
@@ -118,16 +110,6 @@ class ModbusGatewayServer:
             log.info("connected to gateway %s:%d", self.host, self.port)
             await self._handle_client(reader, writer)
             log.info("disconnected from gateway %s:%d; will reconnect", self.host, self.port)
-
-    async def stop(self) -> None:
-        if self._server is not None:
-            self._server.close()
-            await self._server.wait_closed()
-            self._server = None
-
-    @property
-    def sockets(self):
-        return self._server.sockets if self._server else None
 
     async def _handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         peer = writer.get_extra_info("peername")
@@ -194,6 +176,7 @@ class ModbusGatewayServer:
         return None
 
     def _dispatch(self, unit_id: int, pdu: bytes) -> bytes | None:
+        self.request_count += 1
         is_broadcast = unit_id == BROADCAST_UNIT_ID
         if not is_broadcast and unit_id != self.unit_id:
             log.debug("ignoring request for unit id %d (configured as %d)", unit_id, self.unit_id)
@@ -207,9 +190,13 @@ class ModbusGatewayServer:
             log.debug("unit=%d %s -> exception 0x%02X", unit_id, _describe_pdu(pdu), exc.code)
             if is_broadcast:
                 return None
+            self.response_count += 1
             return build_exception_pdu(pdu[0] if pdu else 0, exc.code)
-        log.debug("unit=%d %s -> ok", unit_id, _describe_pdu(pdu))
-        return None if is_broadcast else response
+        log.debug("unit=%d %s -> ok (request #%d)", unit_id, _describe_pdu(pdu), self.request_count)
+        if is_broadcast:
+            return None
+        self.response_count += 1
+        return response
 
 
 def _describe_pdu(pdu: bytes) -> str:
