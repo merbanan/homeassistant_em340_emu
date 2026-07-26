@@ -2,13 +2,16 @@
   "config": {
     "step": {
       "user": {
-        "title": "EM340 emulator listener",
-        "description": "Configure the TCP listener the RS485-to-Ethernet gateway will connect to.",
+        "title": "EM340 emulator connection",
+        "description": "\"Listen\" mode: the gateway dials into Home Assistant -- host/port below is where this integration listens. \"Connect\" mode: this integration dials out to the gateway instead -- host/port below is the gateway's own address. Use \"Connect\" if your gateway's own configuration shows it running as a TCP server (many RS485-to-Ethernet converters do, out of the box).",
         "data": {
-          "host": "Listen address",
-          "port": "Listen port",
+          "connection_mode": "Connection mode",
+          "host": "Listen address (listen mode) / gateway address (connect mode)",
+          "port": "Listen port (listen mode) / gateway port (connect mode)",
           "unit_id": "Modbus unit/slave id",
-          "framing": "Gateway framing"
+          "framing": "Gateway framing",
+          "connect_retry": "Connect mode: keep retrying the connection for up to this many seconds (e.g. to catch a gateway that only powers up when a charger starts)",
+          "retry_interval": "Connect mode: seconds between connection attempts"
         }
       },
       "voltages_currents": {
@@ -71,12 +74,16 @@
   "options": {
     "step": {
       "init": {
-        "title": "EM340 emulator listener",
+        "title": "EM340 emulator connection",
+        "description": "\"Listen\" mode: the gateway dials into Home Assistant -- host/port below is where this integration listens. \"Connect\" mode: this integration dials out to the gateway instead -- host/port below is the gateway's own address.",
         "data": {
-          "host": "Listen address",
-          "port": "Listen port",
+          "connection_mode": "Connection mode",
+          "host": "Listen address (listen mode) / gateway address (connect mode)",
+          "port": "Listen port (listen mode) / gateway port (connect mode)",
           "unit_id": "Modbus unit/slave id",
-          "framing": "Gateway framing"
+          "framing": "Gateway framing",
+          "connect_retry": "Connect mode: keep retrying the connection for up to this many seconds",
+          "retry_interval": "Connect mode: seconds between connection attempts"
         }
       },
       "voltages_currents": {

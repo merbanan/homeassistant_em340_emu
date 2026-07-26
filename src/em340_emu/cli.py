@@ -17,7 +17,7 @@ from .mqtt_source import DEFAULT_PORT as DEFAULT_MQTT_PORT
 from .mqtt_source import MqttSource
 from .parameters import PARAMETERS
 from .registers import RegisterMap
-from .server import ModbusGatewayServer, _describe_pdu
+from .server import ModbusGatewayServer, _describe_pdu, connect_with_retry
 from .sources import apply_values
 
 log = logging.getLogger("em340_emu.cli")
@@ -216,28 +216,14 @@ def _cmd_view_readings(args: argparse.Namespace) -> None:
 
 
 async def _connect_with_retry(host: str, port: int, max_wait: float, retry_interval: float):
-    """Keep trying to connect for up to max_wait seconds.
+    """`sniff`'s thin wrapper around server.connect_with_retry, printing
+    progress instead of logging it (this is a foreground diagnostic tool,
+    not a background service). See that function's docstring for why
+    retrying across a multi-minute window matters."""
+    def _print_retry(attempt: int, exc: OSError, remaining: float) -> None:
+        print(f"  attempt {attempt} failed ({exc}); retrying (up to {remaining:.0f}s left)...", flush=True)
 
-    Some gateways are only powered up by (and thus only reachable once)
-    whatever they're wired to has itself finished booting -- e.g. a
-    Wallbox powering its own RS485-to-Ethernet converter, which then only
-    briefly probes the bus during the charger's own startup. Retrying
-    across a multi-minute window means `sniff` can be started ahead of
-    time and still catch that window instead of needing perfect timing.
-    """
-    start = time.monotonic()
-    attempt = 0
-    while True:
-        attempt += 1
-        try:
-            return await asyncio.open_connection(host, port)
-        except OSError as exc:
-            elapsed = time.monotonic() - start
-            if elapsed >= max_wait:
-                raise
-            remaining = max_wait - elapsed
-            print(f"  attempt {attempt} failed ({exc}); retrying (up to {remaining:.0f}s left)...", flush=True)
-            await asyncio.sleep(min(retry_interval, remaining))
+    return await connect_with_retry(host, port, max_wait, retry_interval, on_retry=_print_retry)
 
 
 async def _run_sniff(args: argparse.Namespace) -> None:

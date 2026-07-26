@@ -14,13 +14,20 @@ from em340_emu.failsafe import FailSafeConfig, FailSafeMonitor
 from em340_emu.sources import apply_values
 
 from .const import (
+    CONF_CONNECT_RETRY,
+    CONF_CONNECTION_MODE,
     CONF_FAILSAFE_IMPORT_LIMIT_W,
     CONF_FAILSAFE_TIMEOUT,
     CONF_FRAMING,
     CONF_MAPPING,
+    CONF_RETRY_INTERVAL,
     CONF_UNIT_ID,
+    CONNECTION_MODE_CONNECT,
+    DEFAULT_CONNECT_RETRY,
+    DEFAULT_CONNECTION_MODE,
     DEFAULT_FAILSAFE_IMPORT_LIMIT_W,
     DEFAULT_FAILSAFE_TIMEOUT,
+    DEFAULT_RETRY_INTERVAL,
     DOMAIN,
     normalize_unit,
 )
@@ -42,11 +49,30 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         port=data[CONF_PORT],
         framing=data[CONF_FRAMING],
     )
-    await server.start()
-    _LOGGER.info(
-        "EM340 emulator listening on %s:%s (unit id %s, framing=%s)",
-        data[CONF_HOST], data[CONF_PORT], data[CONF_UNIT_ID], data[CONF_FRAMING],
-    )
+    connection_mode = data.get(CONF_CONNECTION_MODE, DEFAULT_CONNECTION_MODE)
+    connection_task: asyncio.Task | None = None
+    if connection_mode == CONNECTION_MODE_CONNECT:
+        # The gateway is itself a TCP server (confirmed via a real
+        # gateway's own web UI during this project's development, where
+        # the opposite "listen" assumption doesn't work at all -- it can't
+        # bind to the gateway's own address). Dial out instead, retrying
+        # (and reconnecting if it later drops) in the background.
+        connection_task = asyncio.ensure_future(
+            server.serve_as_client(
+                connect_retry=data.get(CONF_CONNECT_RETRY, DEFAULT_CONNECT_RETRY),
+                retry_interval=data.get(CONF_RETRY_INTERVAL, DEFAULT_RETRY_INTERVAL),
+            )
+        )
+        _LOGGER.info(
+            "EM340 emulator connecting out to %s:%s (unit id %s, framing=%s)",
+            data[CONF_HOST], data[CONF_PORT], data[CONF_UNIT_ID], data[CONF_FRAMING],
+        )
+    else:
+        await server.start()
+        _LOGGER.info(
+            "EM340 emulator listening on %s:%s (unit id %s, framing=%s)",
+            data[CONF_HOST], data[CONF_PORT], data[CONF_UNIT_ID], data[CONF_FRAMING],
+        )
 
     monitor = FailSafeMonitor(
         state,
@@ -95,6 +121,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     async def _async_stop(_event: Event | None = None) -> None:
         monitor_task.cancel()
+        if connection_task is not None:
+            connection_task.cancel()
         await server.stop()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
@@ -102,6 +130,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "state": state,
         "monitor": monitor,
         "monitor_task": monitor_task,
+        "connection_task": connection_task,
         "unsub": unsub,
     }
     entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, _async_stop))
@@ -120,5 +149,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if runtime["unsub"] is not None:
         runtime["unsub"]()
     runtime["monitor_task"].cancel()
+    connection_task = runtime.get("connection_task")
+    if connection_task is not None:
+        connection_task.cancel()
     await runtime["server"].stop()
     return True

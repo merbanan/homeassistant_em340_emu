@@ -10,11 +10,26 @@ CONF_FRAMING = "framing"
 CONF_MAPPING = "mapping"
 CONF_FAILSAFE_TIMEOUT = "failsafe_timeout"
 CONF_FAILSAFE_IMPORT_LIMIT_W = "failsafe_import_limit_w"
+CONF_CONNECTION_MODE = "connection_mode"
+CONF_CONNECT_RETRY = "connect_retry"
+CONF_RETRY_INTERVAL = "retry_interval"
 
 DEFAULT_PORT = 502
 DEFAULT_UNIT_ID = 1
 DEFAULT_FRAMING = "auto"
 FRAMING_OPTIONS = ["auto", "rtu", "tcp"]
+
+# "listen": the gateway dials into us (this integration's original
+# assumption). "connect": we dial out to the gateway instead, for a
+# gateway that is itself a TCP server -- confirmed to be the common case
+# for at least one real RS485-to-Ethernet converter during this project's
+# development (its own web UI showed "Work Mode: TCP Server").
+CONNECTION_MODE_LISTEN = "listen"
+CONNECTION_MODE_CONNECT = "connect"
+CONNECTION_MODE_OPTIONS = [CONNECTION_MODE_LISTEN, CONNECTION_MODE_CONNECT]
+DEFAULT_CONNECTION_MODE = CONNECTION_MODE_LISTEN
+DEFAULT_CONNECT_RETRY = 300.0
+DEFAULT_RETRY_INTERVAL = 2.0
 
 # Seconds without an entity update before the fail-safe engages; <= 0 disables it.
 DEFAULT_FAILSAFE_TIMEOUT = 60

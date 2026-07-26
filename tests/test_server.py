@@ -190,3 +190,101 @@ async def test_debug_log_shows_requests_including_the_contested_id_code_address(
 
     assert any("FC03 read addr=0x000B count=1" in record.message for record in caplog.records)
     assert any("-> ok" in record.message for record in caplog.records)
+
+
+async def test_serve_as_client_dials_out_and_answers():
+    # For a gateway that is itself a TCP server (the opposite of start()'s
+    # assumption): our server dials out to it instead of listening.
+    state = MeterState()
+    state.l1.voltage = 231.0
+    client_server = ModbusGatewayServer(state=state, host="127.0.0.1", port=0, unit_id=1, framing="rtu")
+
+    received: list = []
+
+    async def _gateway_handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        writer.write(_rtu_request(1, bytes([0x03, 0x00, 0x00, 0x00, 0x02])))
+        await writer.drain()
+        response = await asyncio.wait_for(reader.read(64), timeout=2)
+        received.append(response)
+        writer.close()
+
+    gateway = await asyncio.start_server(_gateway_handler, "127.0.0.1", 0)
+    gateway_port = gateway.sockets[0].getsockname()[1]
+    client_server.host = "127.0.0.1"
+    client_server.port = gateway_port
+
+    task = asyncio.create_task(client_server.serve_as_client(connect_retry=2, retry_interval=0.1))
+    try:
+        for _ in range(50):
+            if received:
+                break
+            await asyncio.sleep(0.05)
+    finally:
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        gateway.close()
+        await gateway.wait_closed()
+
+    # serve_as_client reconnects forever by design (see its docstring), and
+    # this test's mock gateway keeps accepting, so more than one cycle may
+    # well have happened by the time we cancel -- that's expected, not a
+    # bug; what matters is that at least one came through correctly.
+    assert len(received) >= 1
+    response = received[0]
+    assert response[0] == 1 and response[1] == 0x03
+    raw = (int.from_bytes(response[5:7], "big") << 16) | int.from_bytes(response[3:5], "big")
+    assert raw == 2310
+
+
+async def test_serve_as_client_retries_until_gateway_available():
+    probe = await asyncio.start_server(lambda r, w: None, "127.0.0.1", 0)
+    port = probe.sockets[0].getsockname()[1]
+    probe.close()
+    await probe.wait_closed()
+
+    connected: list = []
+
+    async def _gateway_handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        connected.append(True)
+        writer.close()
+
+    async def _start_gateway_late():
+        await asyncio.sleep(0.3)
+        return await asyncio.start_server(_gateway_handler, "127.0.0.1", port)
+
+    gateway_task = asyncio.create_task(_start_gateway_late())
+    state = MeterState()
+    client_server = ModbusGatewayServer(state=state, host="127.0.0.1", port=port, unit_id=1, framing="rtu")
+    task = asyncio.create_task(client_server.serve_as_client(connect_retry=5, retry_interval=0.1))
+    try:
+        for _ in range(100):
+            if connected:
+                break
+            await asyncio.sleep(0.05)
+    finally:
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        gateway = await gateway_task
+        gateway.close()
+        await gateway.wait_closed()
+
+    assert len(connected) >= 1  # reconnects forever by design; at least one connection is what matters here
+
+
+async def test_connect_with_retry_gives_up_after_max_wait():
+    from em340_emu.server import connect_with_retry
+
+    probe = await asyncio.start_server(lambda r, w: None, "127.0.0.1", 0)
+    port = probe.sockets[0].getsockname()[1]
+    probe.close()
+    await probe.wait_closed()
+
+    attempts: list = []
+    with pytest.raises(OSError):
+        await connect_with_retry(
+            "127.0.0.1", port, max_wait=0.3, retry_interval=0.1,
+            on_retry=lambda attempt, exc, remaining: attempts.append(attempt),
+        )
+    assert len(attempts) >= 1

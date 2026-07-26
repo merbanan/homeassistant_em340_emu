@@ -113,6 +113,65 @@ async def test_setup_with_no_mapping_still_starts(hass, socket_enabled):
     await hass.async_block_till_done()
 
 
+async def test_connect_mode_dials_out_to_gateway(hass, socket_enabled):
+    # "connect" mode is for a gateway that is itself a TCP server (the real
+    # case that motivated adding it -- see const.py's CONNECTION_MODE_*
+    # docstring): the integration must dial out to host/port instead of
+    # listening on them, or setup fails with "could not bind" since that
+    # address belongs to the gateway, not to Home Assistant.
+    hass.states.async_set("sensor.han_voltage_l1", "230.0", {"unit_of_measurement": "V"})
+
+    received: list = []
+
+    async def _gateway_handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        writer.write(_rtu_request(1, bytes([0x03, 0x00, 0x00, 0x00, 0x02])))
+        await writer.drain()
+        response = await asyncio.wait_for(reader.read(64), timeout=2)
+        received.append(response)
+        writer.close()
+
+    gateway = await asyncio.start_server(_gateway_handler, "127.0.0.1", 0)
+    gateway_port = gateway.sockets[0].getsockname()[1]
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            "host": "127.0.0.1",
+            "port": gateway_port,
+            "unit_id": 1,
+            "framing": "rtu",
+            "connection_mode": "connect",
+            "connect_retry": 5,
+            "retry_interval": 0.1,
+            "mapping": {"voltage_l1": "sensor.han_voltage_l1"},
+        },
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    try:
+        for _ in range(50):
+            if received:
+                break
+            await asyncio.sleep(0.05)
+    finally:
+        gateway.close()
+        await gateway.wait_closed()
+
+    assert len(received) >= 1
+    response = received[0]
+    raw = (int.from_bytes(response[5:7], "big") << 16) | int.from_bytes(response[3:5], "big")
+    assert raw == 2300  # 230.0 V * 10
+
+    runtime = hass.data[DOMAIN][entry.entry_id]
+    assert runtime["connection_task"] is not None
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert runtime["connection_task"].cancelled()
+
+
 async def test_failsafe_engages_and_ramps_when_updates_stop(hass, socket_enabled):
     hass.states.async_set("sensor.han_power_import_l1", "0.5", {"unit_of_measurement": "kW"})
     port = _free_port()

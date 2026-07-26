@@ -1,14 +1,27 @@
-"""Asyncio TCP listener that emulates an EM340 towards an RS485-to-Ethernet
-gateway.
+"""Asyncio TCP listener/client that emulates an EM340 towards an
+RS485-to-Ethernet gateway.
 
-The gateway is expected to dial *into* this listener (its "TCP client"
-mode) forwarding whatever the Wallbox charger sends as the Modbus master on
-the RS485 bus. See framing.py for the two supported wire formats.
+Two gateway arrangements exist in practice, and this supports both:
+
+* The gateway dials *into* us (its "TCP client" mode) -- use start()/
+  serve_forever(), which listens. This was this project's original
+  assumption.
+* The gateway is itself a TCP *server* (common for gateways configured
+  this way out of the box, confirmed via a real gateway's own web UI
+  during this project's development) -- use serve_as_client(), which
+  dials out instead, retrying the connection (including reconnecting if
+  it later drops) rather than listening.
+
+Either way, the actual framing/dispatch logic in _handle_client() is
+identical; it only needs a reader/writer pair; see framing.py for the two
+supported wire formats.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+import time
+from typing import Callable
 
 from .framing import MBAPFramer, RTUFramer, looks_like_mbap
 from .model import MeterState
@@ -19,6 +32,39 @@ log = logging.getLogger("em340_emu.server")
 
 BROADCAST_UNIT_ID = 0
 FC_WRITE_SINGLE = 0x06
+
+
+async def connect_with_retry(
+    host: str,
+    port: int,
+    max_wait: float,
+    retry_interval: float,
+    on_retry: Callable[[int, OSError, float], None] | None = None,
+) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+    """Keep trying to connect for up to max_wait seconds.
+
+    Some gateways are only reachable once whatever they're wired to has
+    itself finished booting (e.g. a Wallbox powering its own RS485-to-
+    Ethernet converter). Retrying across a multi-minute window means a
+    client-mode connection can be started ahead of time and still catch
+    that window instead of needing perfect timing. on_retry, if given, is
+    called with (attempt_number, exception, seconds_remaining) before each
+    retry sleep, e.g. to log or print progress.
+    """
+    start = time.monotonic()
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            return await asyncio.open_connection(host, port)
+        except OSError as exc:
+            elapsed = time.monotonic() - start
+            if elapsed >= max_wait:
+                raise
+            remaining = max_wait - elapsed
+            if on_retry is not None:
+                on_retry(attempt, exc, remaining)
+            await asyncio.sleep(min(retry_interval, remaining))
 
 
 class ModbusGatewayServer:
@@ -50,6 +96,28 @@ class ModbusGatewayServer:
         assert self._server is not None
         async with self._server:
             await self._server.serve_forever()
+
+    async def serve_as_client(self, connect_retry: float = 300.0, retry_interval: float = 2.0) -> None:
+        """Dial out to self.host:self.port and serve requests over that
+        connection, instead of listening -- for a gateway that is itself a
+        TCP server (the opposite of start()'s assumption). Runs forever:
+        reconnects (retrying for up to connect_retry seconds each time)
+        whenever the connection drops, e.g. after a gateway reboot. Meant
+        to be run as a background task and cancelled to stop it.
+        """
+        def _log_retry(attempt: int, exc: OSError, remaining: float) -> None:
+            log.warning(
+                "connect attempt %d to %s:%d failed (%s); retrying (%.0fs left)",
+                attempt, self.host, self.port, exc, remaining,
+            )
+
+        while True:
+            reader, writer = await connect_with_retry(
+                self.host, self.port, connect_retry, retry_interval, on_retry=_log_retry
+            )
+            log.info("connected to gateway %s:%d", self.host, self.port)
+            await self._handle_client(reader, writer)
+            log.info("disconnected from gateway %s:%d; will reconnect", self.host, self.port)
 
     async def stop(self) -> None:
         if self._server is not None:

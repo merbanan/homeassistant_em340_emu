@@ -293,11 +293,30 @@ your Home Assistant config directory, `pip install -e /path/to/modbus-emu`
 into the same Python environment yourself, then restart.
 
 Either way, once installed: add the integration from Settings -> Devices
-& Services. The config flow asks for the listener's host/port/unit
-id/framing, then walks through mapping each parameter to a sensor entity
-(all optional -- leave a field blank to leave that value at its default),
-then the fail-safe settings (see below). Mappings and fail-safe settings
-can both be changed later from the integration's "Configure" option.
+& Services. The config flow first asks for the **connection mode**:
+
+* **Listen** (the original default) -- the gateway dials *into* Home
+  Assistant. Host/port below is the address/port this integration binds
+  and listens on.
+* **Connect** -- Home Assistant dials *out* to the gateway instead. Use
+  this when the gateway itself runs as a TCP server (many RS485-to-
+  Ethernet converters do out of the box -- check the gateway's own web UI
+  for something like "Work Mode: TCP Server"). Host/port below is then the
+  *gateway's* address/port, and "connect retry"/"retry interval" control
+  how long and how often this integration keeps trying to reach it (both
+  on first setup and if the connection later drops, e.g. after the
+  gateway reboots).
+
+Getting this backwards throws `OSError: could not bind on any address` at
+setup (attempting to listen on what's actually the gateway's own address)
+-- if you hit that, switch to Connect mode from the integration's
+"Configure" option.
+
+After that: unit id/framing, then walks through mapping each parameter to
+a sensor entity (all optional -- leave a field blank to leave that value
+at its default), then the fail-safe settings (see below). All of these,
+including the connection mode, can be changed later from the integration's
+"Configure" option.
 
 The component has been exercised against a real Home Assistant instance
 (via `pytest-homeassistant-custom-component`, see "Running the tests"
