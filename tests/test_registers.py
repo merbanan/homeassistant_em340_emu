@@ -122,9 +122,29 @@ def test_energy_totals(state):
     raw = (words[1] << 16) | words[0]
     assert raw == 123456  # 12345.6 kWh * 10
 
-    words = reg.read(state, 0x0050, 2)
+    words = reg.read(state, 0x004E, 2)
     raw = (words[1] << 16) | words[0]
     assert raw == 32  # 3.2 kWh * 10
+
+
+def test_kwh_export_total_at_official_table_2_4_1_address(state):
+    # Table 2.4-1 places "kWh (-) TOT" at physical address 0x004E -- an
+    # earlier community-reference-based mapping had this at 0x0050 instead
+    # (see module docstring). Confirmed directly: a real Wallbox polls
+    # exactly addr=0x004E count=2 every single cycle; under the old wrong
+    # mapping this silently read back 0, hiding exported/solar energy.
+    reg = RegisterMap()
+    words = reg.read(state, 0x004E, 2)
+    raw = (words[1] << 16) | words[0]
+    assert raw == 32  # 3.2 kWh * 10
+
+
+def test_kvarh_export_total_at_official_table_2_4_1_address(state):
+    state.energy_reactive_export = 1.5
+    reg = RegisterMap()
+    words = reg.read(state, 0x0050, 2)
+    raw = (words[1] << 16) | words[0]
+    assert raw == 15  # 1.5 kvarh * 10
 
 
 def test_block_a_and_block_b_agree(state):

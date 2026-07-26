@@ -121,11 +121,19 @@ unimplemented addresses (e.g. for protocol-conformance testing); the
 underlying `RegisterMap(strict=True)` constructor argument does the same
 for library use.
 
-The official protocol PDF's OCR was ambiguous around the export ("(-)")
-energy totals' addresses; those are taken from
-[docs.smart-stuff.nl's EM330/EM340 emulation reference](https://docs.smart-stuff.nl/p1-modbus-dongle/firmware-v1-legacy/register-mapping/em330-em340-emulation.md)
--- a community EM330/EM340 emulator built and used against real Wallbox
-installations.
+**Export energy totals: `0x004E`/`0x0050`, not `0x0050`/`0x0052`.** These
+were originally placed at `0x0050` (kWh(-) TOT) / `0x0052` (kvarh(-) TOT)
+based on
+[docs.smart-stuff.nl's EM330/EM340 emulation reference](https://docs.smart-stuff.nl/p1-modbus-dongle/firmware-v1-legacy/register-mapping/em330-em340-emulation.md),
+since the official protocol PDF's OCR seemed ambiguous there. A direct
+re-read of the actual PDF table (not OCR) shows the real addresses are one
+register-pair lower: `0x004E` (kWh(-) TOT) and `0x0050` (kvarh(-) TOT).
+This was confirmed independently by a 15-minute live capture against a
+real Wallbox: it polls exactly `addr=0x004E count=2` every single cycle,
+without fail, right alongside `V L1-N`/per-phase `W`/`kWh(+) TOT` -- which
+the earlier (wrong) mapping silently answered with `0` via courtesy mode,
+meaning exported/solar energy was invisible to the Wallbox the whole time.
+Table 2.6-1's equivalent addresses (`0x0116`/`0x0118`) were unaffected.
 
 **The `0x000B` overlap.** The official protocol doc documents `0x000B` as
 both the second word of `V L3-L1` (table 2.4-1) and, separately, the
@@ -147,8 +155,11 @@ instead of one clobbering the other.
 Known simplifications, all because a P1/HAN feed doesn't carry this level
 of detail:
 
-* Line-to-line voltages (`V L1-L2` etc.) are derived from the phase-neutral
-  average assuming a balanced system, not independently measured.
+* Line-to-line voltages (`V L1-L2`, `V L2-L3`, `V L3-L1`) *are* implemented,
+  at their correct table 2.4-1 addresses (`0x0006`/`0x0008`/`0x000A`) -- but
+  all three currently return the same approximated value (phase-neutral
+  average x sqrt(3), assuming a balanced 3-phase system), not independently
+  measured line-to-line voltages, since a P1/HAN feed doesn't provide those.
 * Per-phase cumulative energy (`kWh(+) L1/L2/L3`) is an even 3-way split of
   the system total, since Sweden's H1-port only exposes energy at the
   system level.

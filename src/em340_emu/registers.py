@@ -29,10 +29,19 @@ regardless of how it's read -- but since we aren't bound to replicate that
 ambiguity, this gives correct answers for both access patterns instead of
 one clobbering the other.
 
-The export ("(-)") energy total addresses (0x0050/0x0052) below are also
-taken from that same community reference, since the official protocol
-doc's OCR left them ambiguous and the community mapping was independently
-confirmed against two firmware versions.
+The export ("(-)") energy total addresses in table 2.4-1 were originally
+taken from a community EM330/EM340 reference (docs.smart-stuff.nl) as
+0x0050 (kWh(-) TOT) / 0x0052 (kvarh(-) TOT), since the official protocol
+PDF's OCR seemed ambiguous there. A direct re-read of the official PDF
+(not OCR -- the actual table 2.4-1 rows) shows this was wrong: the real
+addresses are 0x004E (kWh(-) TOT) and 0x0050 (kvarh(-) TOT), one
+register-pair lower. This was confirmed independently by a 15-minute live
+capture against a real Wallbox: it polls exactly `addr=0x004E count=2`
+every single cycle, without fail, alongside V L1-N/W-per-phase/kWh(+) TOT
+-- which the earlier (wrong) mapping silently answered with 0 via
+courtesy mode, meaning exported/solar energy was invisible to the Wallbox
+the entire time. Table 2.6-1's equivalent addresses (0x0116/0x0118) were
+independently correct and unaffected by this.
 
 Registers documented as "n.a." / "Not available, value = 0" are served as
 a constant 0 rather than an illegal-address exception, matching real
@@ -147,8 +156,14 @@ _BLOCK_A: list[RegisterDef] = [
     _reg(0x0040, 2, "uint32", 10, lambda s: _phase_energy_share(s, "energy_active_import"), "kWh(+) L1"),
     _reg(0x0042, 2, "uint32", 10, lambda s: _phase_energy_share(s, "energy_active_import"), "kWh(+) L2"),
     _reg(0x0044, 2, "uint32", 10, lambda s: _phase_energy_share(s, "energy_active_import"), "kWh(+) L3"),
-    _reg(0x0050, 2, "uint32", 10, lambda s: s.energy_active_export, "kWh(-) TOT"),
-    _reg(0x0052, 2, "uint32", 10, lambda s: s.energy_reactive_export, "kvarh(-) TOT"),
+    # Not 0x0050/0x0052 -- see module docstring for how that earlier
+    # mapping was found wrong via a real Wallbox capture. 0x0046/0x0048
+    # (kWh(+) t1/t2, tariff-specific active energy) and 0x004A/0x004C
+    # (kWh(+) t3/t4, "not available" on real hardware) are left unimplemented
+    # -- courtesy mode already answers them with 0, and no observed Wallbox
+    # traffic has ever read them.
+    _reg(0x004E, 2, "uint32", 10, lambda s: s.energy_active_export, "kWh(-) TOT"),
+    _reg(0x0050, 2, "uint32", 10, lambda s: s.energy_reactive_export, "kvarh(-) TOT"),
 ]
 _BLOCK_A_ENVELOPE = (0x0000, 0x0053)
 
