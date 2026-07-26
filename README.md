@@ -464,6 +464,59 @@ being treated as an error:
 DEBUG em340_emu.framing: ignored 3 unrecognized byte(s) before a valid frame: 8c00fc
 ```
 
+### Confirmed via live capture: exactly what this Wallbox reads
+
+Two passive `sniff` captures against a real Wallbox+gateway (15 minutes of
+steady-state traffic, then 20 minutes spanning a live Wallbox restart)
+give a complete, empirical picture -- not inference -- of every register
+this specific unit has ever been observed reading on the unit id it
+answers on:
+
+* **Steady-state polling**, repeating every ~0.4-0.9s for the entire
+  session: `addr=0x0000 count=18` (voltages + currents), `addr=0x0012
+  count=6` (per-phase active power), `addr=0x0034 count=2` (`kWh(+) TOT`),
+  `addr=0x004E count=2` (`kWh(-) TOT`).
+* **A one-time detection sequence**, seen only once per session -- right
+  at connect, and again (still on the *same* TCP/RS485 session, which
+  never dropped) the moment the Wallbox itself restarted mid-capture: an
+  isolated `addr=0x000B count=1` (identification code) immediately
+  followed by `addr=0x5000 count=7` (serial number) and `addr=0x1103
+  count=1` (measurement mode), all within ~60ms of each other, then
+  straight into the steady-state cycle above.
+* **A slave-id scan on every restart**, targeting at least unit id 2 (this
+  emulator only answers unit id 1): repeated bursts of `0x000B` and
+  `0x4002` (table 2.9-8's "reset of run hour meter", read rather than
+  written -- likely just probing for a response, not actually invoking the
+  reset) over about 48 seconds, then abandoned. Since nothing answers unit
+  id 2, this never interrupts the unit id 1 session running concurrently
+  -- confirms the earlier decision to keep this emulator on unit id 1 and
+  ignore other unit ids is correct and robust across a real restart, not
+  just under normal operation.
+* Each unanswered unit id 2 query is followed by a few stray 3-4 byte
+  fragments that never form a valid CRC-checked frame -- consistent with
+  RS485 line noise/reflection after a query nothing answers, already
+  handled by `RTUFramer`'s garbage-skip (see above) without any special
+  casing needed.
+
+**Minimum P1/HAN entities actually required**, based strictly on the
+above (not the full mapping steps the config flow offers, which are kept
+broader for other Wallbox firmware/configurations that might read more):
+
+| Required | Not observed being read (safe to leave unmapped for *this* unit) |
+| --- | --- |
+| `voltage_l1`, `voltage_l2`, `voltage_l3` | All reactive power fields (`reactive_power_import/export_l1/l2/l3`) |
+| `current_l1`, `current_l2`, `current_l3` | `energy_reactive_import`, `energy_reactive_export` |
+| `active_power_import_l1/l2/l3` (and the matching `_export_l1/l2/l3` fields if the site ever exports/has solar, so net `W L1/L2/L3` comes out signed correctly) | `frequency` (Hz was never polled in either capture) |
+| `energy_active_import` | |
+| `energy_active_export` (this is exactly what was silently broken until the `0x004E` fix above) | |
+
+The identification code, serial number, and measurement-mode registers
+need no P1/HAN entity at all -- they're fixed constants the library
+already answers correctly. This isn't a guarantee no other Wallbox
+firmware/setup will ever read the unmapped fields (table 2.4-1/2.6-1 are
+still fully implemented for that reason), just a concrete, observation-based
+answer to "what do I actually need to keep flowing right now."
+
 ## Wallbox meter profile
 
 Per Wallbox's own Energy Meters Installation Guide, `EM340` (PF.A or PF.B)
