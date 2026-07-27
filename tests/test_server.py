@@ -116,6 +116,21 @@ async def test_wrong_unit_id_gets_no_response():
     assert response == b""
 
 
+async def test_seconds_since_last_request_tracks_requests_addressed_to_us():
+    server = ModbusGatewayServer(state=MeterState(), host="", port=0, unit_id=1, framing="rtu")
+    assert server.seconds_since_last_request() is None  # nothing ever arrived
+
+    await _exchange(server, _rtu_request(1, bytes([0x03, 0x00, 0x00, 0x00, 0x02])))
+    elapsed = server.seconds_since_last_request()
+    assert elapsed is not None and elapsed < 2.0
+
+
+async def test_seconds_since_last_request_ignores_wrong_unit_id():
+    server = ModbusGatewayServer(state=MeterState(), host="", port=0, unit_id=1, framing="rtu")
+    await _exchange(server, _rtu_request(2, bytes([0x03, 0x00, 0x00, 0x00, 0x02])), timeout=0.3)
+    assert server.seconds_since_last_request() is None  # unit 2 isn't us
+
+
 async def test_unimplemented_address_returns_courtesy_zero_by_default():
     # RegisterMap() defaults to courtesy mode (see its docstring): an
     # address we haven't implemented reads back as 0 rather than raising,

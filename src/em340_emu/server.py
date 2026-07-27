@@ -91,6 +91,18 @@ class ModbusGatewayServer:
         # ones filtered out below) vs. every one actually answered.
         self.request_count = 0
         self.response_count = 0
+        # monotonic timestamp of the last request actually addressed to us
+        # (this unit id, or broadcast) -- None until the first one arrives.
+        # Lets a caller (e.g. the HA integration's health indicator) tell
+        # whether the master is still actively polling, not just whether it
+        # ever did.
+        self.last_request_at: float | None = None
+
+    def seconds_since_last_request(self) -> float | None:
+        """None if no request addressed to us has ever arrived."""
+        if self.last_request_at is None:
+            return None
+        return time.monotonic() - self.last_request_at
 
     async def serve_as_client(self, connect_retry: float | None = None, retry_interval: float = 15.0) -> None:
         """Dial out to self.host:self.port and serve requests over that
@@ -190,6 +202,7 @@ class ModbusGatewayServer:
         if not is_broadcast and unit_id != self.unit_id:
             log.debug("ignoring request for unit id %d (configured as %d)", unit_id, self.unit_id)
             return None
+        self.last_request_at = time.monotonic()
         if is_broadcast and (not pdu or pdu[0] != FC_WRITE_SINGLE):
             return None  # broadcast is only meaningful for FC06, and never gets a reply
 

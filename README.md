@@ -358,7 +358,17 @@ polling and your P1/HAN mapping is actually receiving updates without
 digging through debug logs. All of these update live (no polling delay
 worse than ~2 seconds).
 
-The quickest way to see them: go to the integration's device page
+There's also a **"Data flow healthy" light**: green while both (a) the
+Wallbox has read a register from us within the last 10 seconds (steady-
+state polling is every ~0.4-0.9s, see "Confirmed via live capture" below,
+so 10s comfortably absorbs any brief hiccup) and (b) the fail-safe hasn't
+had to engage, i.e. the P1/HAN entities are updating recently enough
+(governed by the fail-safe's own configurable timeout, default 60s -- see
+"Fail-safe" below). Red if either condition fails -- a single glance tells
+you whether the whole chain (P1 meter -> Home Assistant -> emulator ->
+Wallbox) is actually working, not just whether Home Assistant itself is up.
+
+The quickest way to see all of these: go to the integration's device page
 (Settings -> Devices & Services -> EM340 Modbus Emulator -> the device) --
 every entity is listed there automatically, no dashboard setup needed.
 
@@ -369,12 +379,12 @@ like:
 type: entities
 title: EM340 Emulator
 entities:
-  - entity: sensor.em340_emulator_192_168_200_7_12345_active_power_total
-  - entity: sensor.em340_emulator_192_168_200_7_12345_voltage_l1
-  - entity: sensor.em340_emulator_192_168_200_7_12345_current_l1
+  - entity: light.em340_emulator_192_168_200_7_12345_data_flow_healthy
   - entity: sensor.em340_emulator_192_168_200_7_12345_energy_active_import
-  - entity: sensor.em340_emulator_192_168_200_7_12345_modbus_requests_from_gateway
-  - entity: sensor.em340_emulator_192_168_200_7_12345_entity_value_updates_received
+  - entity: sensor.em340_emulator_192_168_200_7_12345_energy_active_export
+  - entity: sensor.em340_emulator_192_168_200_7_12345_current_l1
+  - entity: sensor.em340_emulator_192_168_200_7_12345_current_l2
+  - entity: sensor.em340_emulator_192_168_200_7_12345_current_l3
 ```
 
 The exact entity ids depend on your config entry's title (gateway

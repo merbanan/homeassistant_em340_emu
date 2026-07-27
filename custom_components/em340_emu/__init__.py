@@ -31,7 +31,7 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[str] = ["sensor"]
+PLATFORMS: list[str] = ["sensor", "light"]
 
 # How often sensor entities refresh from the shared MeterState/counters even
 # absent a fresh entity update -- e.g. so the fail-safe's ramp is visible
