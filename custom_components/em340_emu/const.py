@@ -46,6 +46,17 @@ DEFAULT_FAILSAFE_IMPORT_LIMIT_W = 11000
 # each mapping step, and in what order. Labels/units/OBIS codes live in
 # em340_emu.parameters (the single source of truth, also used by
 # `em340-emu view-readings`); this only decides UI grouping/ordering.
+#
+# Trimmed to exactly what two live captures (15min steady-state + 20min
+# spanning a real Wallbox restart, see README "Confirmed via live capture")
+# showed this Wallbox actually reading: voltages/currents, per-phase active
+# power (import+export, so signed net power comes out right), and the two
+# active energy totals. Reactive power/energy and frequency were never
+# polled in either capture, so they're no longer part of setup -- unmapped
+# fields simply keep MeterState's defaults (0 var/varh, 50Hz), which is
+# harmless if some other Wallbox firmware ever does read them. The
+# underlying register map still implements every table 2.4-1/2.6-1 field
+# regardless, in case that assumption ever needs revisiting.
 MAPPING_STEPS: dict[str, list[str]] = {
     "voltages_currents": ["voltage_l1", "voltage_l2", "voltage_l3", "current_l1", "current_l2", "current_l3"],
     "active_power": [
@@ -53,16 +64,7 @@ MAPPING_STEPS: dict[str, list[str]] = {
         "active_power_import_l2", "active_power_export_l2",
         "active_power_import_l3", "active_power_export_l3",
     ],
-    "reactive_power": [
-        "reactive_power_import_l1", "reactive_power_export_l1",
-        "reactive_power_import_l2", "reactive_power_export_l2",
-        "reactive_power_import_l3", "reactive_power_export_l3",
-    ],
-    "energy": [
-        "energy_active_import", "energy_active_export",
-        "energy_reactive_import", "energy_reactive_export",
-        "frequency",
-    ],
+    "energy": ["energy_active_import", "energy_active_export"],
 }
 
 ALL_MAPPING_FIELDS: list[str] = [key for keys in MAPPING_STEPS.values() for key in keys]

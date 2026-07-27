@@ -73,8 +73,8 @@ def _failsafe_schema(defaults: dict[str, Any]) -> vol.Schema:
 
 
 class _MappingFlowMixin:
-    """Shared logic for walking the 4 mapping steps, used by both the
-    initial config flow and the options (reconfigure) flow."""
+    """Shared logic for walking the mapping steps (see MAPPING_STEPS),
+    used by both the initial config flow and the options (reconfigure) flow."""
 
     _data: dict[str, Any]
 
@@ -128,9 +128,6 @@ class Em340EmuConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_active_power(self, user_input: dict[str, Any] | None = None):
         return await self._async_mapping_step("active_power", user_input)
 
-    async def async_step_reactive_power(self, user_input: dict[str, Any] | None = None):
-        return await self._async_mapping_step("reactive_power", user_input)
-
     async def async_step_energy(self, user_input: dict[str, Any] | None = None):
         return await self._async_mapping_step("energy", user_input)
 
@@ -166,9 +163,6 @@ class Em340EmuOptionsFlow(config_entries.OptionsFlow):
 
     async def async_step_active_power(self, user_input: dict[str, Any] | None = None):
         return await self._async_mapping_step("active_power", user_input)
-
-    async def async_step_reactive_power(self, user_input: dict[str, Any] | None = None):
-        return await self._async_mapping_step("reactive_power", user_input)
 
     async def async_step_energy(self, user_input: dict[str, Any] | None = None):
         return await self._async_mapping_step("energy", user_input)

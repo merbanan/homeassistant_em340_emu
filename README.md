@@ -298,8 +298,14 @@ web UI for something like "Work Mode: TCP Server").
 | --- | --- |
 | Voltages & currents | Phase voltage L1/L2/L3, phase current L1/L2/L3 |
 | Active power | Active power L1/L2/L3 import/export |
-| Reactive power (optional) | Reactive power L1/L2/L3 import/export |
-| Cumulative energy | Cumulative active/reactive energy import/export |
+| Cumulative energy | Cumulative active energy import/export |
+
+The setup flow only asks for these -- trimmed to exactly what two live
+Wallbox captures showed getting read (see "Confirmed via live capture"
+below); there's no reactive power/energy or frequency step, since neither
+was ever polled. The underlying register map still implements them (in
+case some other Wallbox firmware ever does read them), they just default
+to `0`/`50Hz` without needing a P1/HAN entity mapped to them.
 
 **Install via HACS:** add `https://github.com/merbanan/homeassistant_em340_emu`
 as a custom repository (category: Integration), then install "EM340 Modbus
@@ -499,23 +505,27 @@ answers on:
   casing needed.
 
 **Minimum P1/HAN entities actually required**, based strictly on the
-above (not the full mapping steps the config flow offers, which are kept
-broader for other Wallbox firmware/configurations that might read more):
+above -- and, since this Wallbox's own confirmed behavior is the basis for
+it, exactly what the HA integration's setup flow asks for (see "Home
+Assistant integration" above; there's no reactive power/energy or
+frequency step at all anymore):
 
-| Required | Not observed being read (safe to leave unmapped for *this* unit) |
-| --- | --- |
-| `voltage_l1`, `voltage_l2`, `voltage_l3` | All reactive power fields (`reactive_power_import/export_l1/l2/l3`) |
-| `current_l1`, `current_l2`, `current_l3` | `energy_reactive_import`, `energy_reactive_export` |
-| `active_power_import_l1/l2/l3` (and the matching `_export_l1/l2/l3` fields if the site ever exports/has solar, so net `W L1/L2/L3` comes out signed correctly) | `frequency` (Hz was never polled in either capture) |
-| `energy_active_import` | |
-| `energy_active_export` (this is exactly what was silently broken until the `0x004E` fix above) | |
+* `voltage_l1`, `voltage_l2`, `voltage_l3`
+* `current_l1`, `current_l2`, `current_l3`
+* `active_power_import_l1/l2/l3` (and the matching `_export_l1/l2/l3`
+  fields if the site ever exports/has solar, so net `W L1/L2/L3` comes out
+  signed correctly)
+* `energy_active_import`
+* `energy_active_export` (this is exactly what was silently broken until
+  the `0x004E` fix above)
 
 The identification code, serial number, and measurement-mode registers
 need no P1/HAN entity at all -- they're fixed constants the library
-already answers correctly. This isn't a guarantee no other Wallbox
-firmware/setup will ever read the unmapped fields (table 2.4-1/2.6-1 are
-still fully implemented for that reason), just a concrete, observation-based
-answer to "what do I actually need to keep flowing right now."
+already answers correctly. Reactive power/energy and frequency are no
+longer collected by the config flow, but the underlying register map
+still implements them (table 2.4-1/2.6-1, in full) in case that assumption
+about this Wallbox's firmware/configuration ever needs revisiting --
+unmapped, they just default to `0`/`50Hz` rather than being unavailable.
 
 ## Wallbox meter profile
 

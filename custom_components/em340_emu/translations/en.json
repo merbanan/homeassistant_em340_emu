@@ -37,27 +37,12 @@
           "active_power_export_l3": "Active power L3 export (1-62.7.0)"
         }
       },
-      "reactive_power": {
-        "title": "Map reactive power",
-        "description": "Optional; leave blank if your P1/HAN source doesn't expose reactive power.",
-        "data": {
-          "reactive_power_import_l1": "Reactive power L1 import (1-23.7.0)",
-          "reactive_power_export_l1": "Reactive power L1 export (1-24.7.0)",
-          "reactive_power_import_l2": "Reactive power L2 import (1-43.7.0)",
-          "reactive_power_export_l2": "Reactive power L2 export (1-44.7.0)",
-          "reactive_power_import_l3": "Reactive power L3 import (1-63.7.0)",
-          "reactive_power_export_l3": "Reactive power L3 export (1-64.7.0)"
-        }
-      },
       "energy": {
         "title": "Map cumulative energy",
         "description": "These are absolute meter readings, not deltas.",
         "data": {
           "energy_active_import": "Cumulative active energy import (1-1.8.0)",
-          "energy_active_export": "Cumulative active energy export (1-2.8.0)",
-          "energy_reactive_import": "Cumulative reactive energy import (1-3.8.0)",
-          "energy_reactive_export": "Cumulative reactive energy export (1-4.8.0)",
-          "frequency": "Grid frequency (optional)"
+          "energy_active_export": "Cumulative active energy export (1-2.8.0)"
         }
       },
       "failsafe": {
@@ -106,25 +91,11 @@
           "active_power_export_l3": "Active power L3 export (1-62.7.0)"
         }
       },
-      "reactive_power": {
-        "title": "Map reactive power",
-        "data": {
-          "reactive_power_import_l1": "Reactive power L1 import (1-23.7.0)",
-          "reactive_power_export_l1": "Reactive power L1 export (1-24.7.0)",
-          "reactive_power_import_l2": "Reactive power L2 import (1-43.7.0)",
-          "reactive_power_export_l2": "Reactive power L2 export (1-44.7.0)",
-          "reactive_power_import_l3": "Reactive power L3 import (1-63.7.0)",
-          "reactive_power_export_l3": "Reactive power L3 export (1-64.7.0)"
-        }
-      },
       "energy": {
         "title": "Map cumulative energy",
         "data": {
           "energy_active_import": "Cumulative active energy import (1-1.8.0)",
-          "energy_active_export": "Cumulative active energy export (1-2.8.0)",
-          "energy_reactive_import": "Cumulative reactive energy import (1-3.8.0)",
-          "energy_reactive_export": "Cumulative reactive energy export (1-4.8.0)",
-          "frequency": "Grid frequency (optional)"
+          "energy_active_export": "Cumulative active energy export (1-2.8.0)"
         }
       },
       "failsafe": {
