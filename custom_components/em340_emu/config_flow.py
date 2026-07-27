@@ -10,14 +10,12 @@ from homeassistant.core import callback
 from homeassistant.helpers import selector
 
 from .const import (
-    CONF_CONNECT_RETRY,
     CONF_FAILSAFE_IMPORT_LIMIT_W,
     CONF_FAILSAFE_TIMEOUT,
     CONF_FRAMING,
     CONF_MAPPING,
     CONF_RETRY_INTERVAL,
     CONF_UNIT_ID,
-    DEFAULT_CONNECT_RETRY,
     DEFAULT_FAILSAFE_IMPORT_LIMIT_W,
     DEFAULT_FAILSAFE_TIMEOUT,
     DEFAULT_FRAMING,
@@ -39,9 +37,6 @@ def _network_schema(defaults: dict[str, Any]) -> vol.Schema:
             vol.Required(CONF_PORT, default=defaults.get(CONF_PORT, DEFAULT_PORT)): int,
             vol.Required(CONF_UNIT_ID, default=defaults.get(CONF_UNIT_ID, DEFAULT_UNIT_ID)): int,
             vol.Required(CONF_FRAMING, default=defaults.get(CONF_FRAMING, DEFAULT_FRAMING)): vol.In(FRAMING_OPTIONS),
-            vol.Required(
-                CONF_CONNECT_RETRY, default=defaults.get(CONF_CONNECT_RETRY, DEFAULT_CONNECT_RETRY)
-            ): vol.Coerce(float),
             vol.Required(
                 CONF_RETRY_INTERVAL, default=defaults.get(CONF_RETRY_INTERVAL, DEFAULT_RETRY_INTERVAL)
             ): vol.Coerce(float),

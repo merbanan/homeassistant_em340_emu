@@ -263,3 +263,45 @@ async def test_connect_with_retry_gives_up_after_max_wait():
             on_retry=lambda attempt, exc, remaining: attempts.append(attempt),
         )
     assert len(attempts) >= 1
+
+
+async def test_connect_with_retry_never_gives_up_when_max_wait_is_none():
+    # None is the default for serve_as_client (see its docstring): a
+    # persistent background service should never stop trying to reach a
+    # gateway that's meant to always be there.
+    from em340_emu.server import connect_with_retry
+
+    probe = await asyncio.start_server(lambda r, w: None, "127.0.0.1", 0)
+    port = probe.sockets[0].getsockname()[1]
+    probe.close()
+    await probe.wait_closed()
+
+    attempts: list = []
+    remainings: list = []
+
+    async def _accept_and_close(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        # Must close, or Server.wait_closed() below hangs waiting for this
+        # still-open connection to finish.
+        writer.close()
+
+    async def _start_gateway_late():
+        await asyncio.sleep(0.3)  # outlasts what a bounded max_wait would allow
+        return await asyncio.start_server(_accept_and_close, "127.0.0.1", port)
+
+    gateway_task = asyncio.create_task(_start_gateway_late())
+    try:
+        reader, writer = await asyncio.wait_for(
+            connect_with_retry(
+                "127.0.0.1", port, max_wait=None, retry_interval=0.05,
+                on_retry=lambda attempt, exc, remaining: (attempts.append(attempt), remainings.append(remaining)),
+            ),
+            timeout=5,
+        )
+        writer.close()
+    finally:
+        gateway = await gateway_task
+        gateway.close()
+        await gateway.wait_closed()
+
+    assert len(attempts) >= 1  # retried past where a short bounded max_wait would have raised
+    assert all(r == float("inf") for r in remainings)

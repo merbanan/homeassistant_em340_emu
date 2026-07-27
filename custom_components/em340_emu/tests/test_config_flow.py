@@ -21,7 +21,6 @@ async def test_setup_flow_has_no_reactive_power_step(hass):
             "port": 12345,
             "unit_id": 1,
             "framing": "rtu",
-            "connect_retry": 60.0,
             "retry_interval": 2.0,
         },
     )

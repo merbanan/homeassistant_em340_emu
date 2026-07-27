@@ -9,8 +9,7 @@
           "port": "Gateway port",
           "unit_id": "Modbus unit/slave id",
           "framing": "Gateway framing",
-          "connect_retry": "Keep retrying the connection for up to this many seconds (e.g. to catch a gateway that only powers up when a charger starts)",
-          "retry_interval": "Seconds between connection attempts"
+          "retry_interval": "Seconds between connection attempts (it retries forever, e.g. to catch a gateway that only powers up when a charger starts)"
         }
       },
       "voltages_currents": {
@@ -65,8 +64,7 @@
           "port": "Gateway port",
           "unit_id": "Modbus unit/slave id",
           "framing": "Gateway framing",
-          "connect_retry": "Keep retrying the connection for up to this many seconds",
-          "retry_interval": "Seconds between connection attempts"
+          "retry_interval": "Seconds between connection attempts (it retries forever)"
         }
       },
       "voltages_currents": {

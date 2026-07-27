@@ -88,9 +88,10 @@ async def _run_serve(args: argparse.Namespace) -> None:
         framing=args.framing,
         registers=RegisterMap(strict=args.strict),
     )
+    retry_desc = "retrying forever" if args.connect_retry is None else f"retrying up to {args.connect_retry:.0f}s"
     log.info(
-        "connecting to gateway %s:%d (unit id %d, framing=%s, retrying up to %.0fs if needed)",
-        args.host, args.port, args.unit_id, args.framing, args.connect_retry,
+        "connecting to gateway %s:%d (unit id %d, framing=%s, %s if needed, every %.0fs)",
+        args.host, args.port, args.unit_id, args.framing, retry_desc, args.retry_interval,
     )
 
     monitor = FailSafeMonitor(
@@ -147,6 +148,10 @@ def _cmd_serve(args: argparse.Namespace) -> None:
         asyncio.run(_run_serve(args))
     except KeyboardInterrupt:
         pass
+    except OSError as exc:
+        # Only reachable with an explicit finite --connect-retry (the
+        # default is to retry forever, see serve_as_client's docstring).
+        log.error("could not connect to %s:%d: %s", args.host, args.port, exc)
 
 
 def _cmd_registers(args: argparse.Namespace) -> None:
@@ -324,8 +329,8 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--unit-id", type=int, default=1, help="Modbus slave/unit id to answer as (default: 1)")
     serve.add_argument("--framing", choices=["auto", "rtu", "tcp"], default="auto", help="wire framing used by the gateway (default: auto-detect per connection)")
     serve.add_argument("--strict", action="store_true", help="raise a Modbus exception for any unimplemented register instead of the default courtesy-mode 0 (see RegisterMap docstring)")
-    serve.add_argument("--connect-retry", type=float, default=300.0, help="keep retrying the connection for up to this many seconds, e.g. to catch a gateway that only powers up when a charger starts (default: 300 = 5 minutes)")
-    serve.add_argument("--retry-interval", type=float, default=2.0, help="seconds between connection attempts (default: 2.0)")
+    serve.add_argument("--connect-retry", type=float, default=None, help="give up and exit after this many seconds of failed connection attempts, instead of the default of retrying forever (recommended for a persistent service)")
+    serve.add_argument("--retry-interval", type=float, default=15.0, help="seconds between connection attempts (default: 15.0)")
     serve.add_argument("--values", help="path to a JSON file with live readings, hot-reloaded on change")
     serve.add_argument("--poll-interval", type=float, default=1.0, help="seconds between checks of --values / demo ticks (default: 1.0)")
     serve.add_argument("--demo", action="store_true", help="ignore --values/mqtt and run a self-contained demo load pattern")

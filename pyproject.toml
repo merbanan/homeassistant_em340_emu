@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "em340-emu"
-version = "0.4.0"
+version = "0.4.1"
 description = "Carlo Gavazzi EM340 Modbus meter emulator for RS485-to-Ethernet gateways (e.g. towards a Wallbox charger)"
 readme = "README.md"
 requires-python = ">=3.10"

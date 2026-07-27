@@ -15,14 +15,12 @@ from em340_emu.failsafe import FailSafeConfig, FailSafeMonitor
 from em340_emu.sources import apply_values
 
 from .const import (
-    CONF_CONNECT_RETRY,
     CONF_FAILSAFE_IMPORT_LIMIT_W,
     CONF_FAILSAFE_TIMEOUT,
     CONF_FRAMING,
     CONF_MAPPING,
     CONF_RETRY_INTERVAL,
     CONF_UNIT_ID,
-    DEFAULT_CONNECT_RETRY,
     DEFAULT_FAILSAFE_IMPORT_LIMIT_W,
     DEFAULT_FAILSAFE_TIMEOUT,
     DEFAULT_RETRY_INTERVAL,
@@ -66,13 +64,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     # Every gateway actually used with this project has turned out to be a
     # TCP server in its own right, so we always dial out to it rather than
-    # listen (see server.py's module docstring) -- retrying (and
-    # reconnecting if it later drops) in the background.
+    # listen (see server.py's module docstring) -- retrying forever (and
+    # reconnecting if it later drops) in the background; connect_retry is
+    # intentionally left at its default of None (no give-up) since a
+    # persistent integration should never stop trying.
     connection_task = asyncio.ensure_future(
-        server.serve_as_client(
-            connect_retry=data.get(CONF_CONNECT_RETRY, DEFAULT_CONNECT_RETRY),
-            retry_interval=data.get(CONF_RETRY_INTERVAL, DEFAULT_RETRY_INTERVAL),
-        )
+        server.serve_as_client(retry_interval=data.get(CONF_RETRY_INTERVAL, DEFAULT_RETRY_INTERVAL))
     )
     _LOGGER.info(
         "EM340 emulator connecting out to %s:%s (unit id %s, framing=%s)",

@@ -34,19 +34,23 @@ FC_WRITE_SINGLE = 0x06
 async def connect_with_retry(
     host: str,
     port: int,
-    max_wait: float,
+    max_wait: float | None,
     retry_interval: float,
     on_retry: Callable[[int, OSError, float], None] | None = None,
 ) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
-    """Keep trying to connect for up to max_wait seconds.
+    """Keep trying to connect for up to max_wait seconds, or forever if
+    max_wait is None.
 
     Some gateways are only reachable once whatever they're wired to has
     itself finished booting (e.g. a Wallbox powering its own RS485-to-
-    Ethernet converter). Retrying across a multi-minute window means a
-    client-mode connection can be started ahead of time and still catch
-    that window instead of needing perfect timing. on_retry, if given, is
-    called with (attempt_number, exception, seconds_remaining) before each
-    retry sleep, e.g. to log or print progress.
+    Ethernet converter). Retrying indefinitely means a client-mode
+    connection can be started ahead of time and still catch that window
+    instead of needing perfect timing -- and keeps trying to recover if the
+    gateway later goes away for a while (e.g. its own reboot), rather than
+    giving up permanently. on_retry, if given, is called with
+    (attempt_number, exception, seconds_remaining) before each retry sleep,
+    e.g. to log or print progress; seconds_remaining is float("inf") when
+    max_wait is None.
     """
     start = time.monotonic()
     attempt = 0
@@ -56,12 +60,12 @@ async def connect_with_retry(
             return await asyncio.open_connection(host, port)
         except OSError as exc:
             elapsed = time.monotonic() - start
-            if elapsed >= max_wait:
+            if max_wait is not None and elapsed >= max_wait:
                 raise
-            remaining = max_wait - elapsed
+            remaining = float("inf") if max_wait is None else max_wait - elapsed
             if on_retry is not None:
                 on_retry(attempt, exc, remaining)
-            await asyncio.sleep(min(retry_interval, remaining))
+            await asyncio.sleep(retry_interval if max_wait is None else min(retry_interval, remaining))
 
 
 class ModbusGatewayServer:
@@ -88,19 +92,24 @@ class ModbusGatewayServer:
         self.request_count = 0
         self.response_count = 0
 
-    async def serve_as_client(self, connect_retry: float = 300.0, retry_interval: float = 2.0) -> None:
+    async def serve_as_client(self, connect_retry: float | None = None, retry_interval: float = 15.0) -> None:
         """Dial out to self.host:self.port and serve requests over that
         connection, for a gateway that is itself a TCP server. Runs
-        forever: reconnects (retrying for up to connect_retry seconds each
-        time) whenever the connection drops, e.g. after a gateway reboot.
+        forever: reconnects (retrying every retry_interval seconds --
+        forever by default, since connect_retry defaults to None) whenever
+        the connection drops, e.g. after a gateway reboot. There's no good
+        reason for a persistent background service to ever stop trying to
+        reach a gateway that's meant to always be there, so pass a bounded
+        connect_retry only for diagnostic/one-shot uses (e.g. cli.py's
+        sniff, which wants to eventually give up and report an error).
         Meant to be run as a background task and cancelled to stop it --
         cancellation propagates into _handle_client(), whose finally block
         closes the connection, so no separate stop/close call is needed.
         """
         def _log_retry(attempt: int, exc: OSError, remaining: float) -> None:
             log.warning(
-                "connect attempt %d to %s:%d failed (%s); retrying (%.0fs left)",
-                attempt, self.host, self.port, exc, remaining,
+                "connect attempt %d to %s:%d failed (%s); retrying in %.0fs",
+                attempt, self.host, self.port, exc, retry_interval,
             )
 
         while True:

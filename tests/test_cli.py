@@ -30,8 +30,8 @@ def test_serve_defaults_to_mqtt_source():
     assert args.values is None
     assert args.unit_id == 1
     assert args.strict is False  # courtesy mode (RegisterMap default) is the default
-    assert args.connect_retry == 300.0
-    assert args.retry_interval == 2.0
+    assert args.connect_retry is None  # retries forever by default
+    assert args.retry_interval == 15.0
 
 
 def test_serve_requires_host_and_port():

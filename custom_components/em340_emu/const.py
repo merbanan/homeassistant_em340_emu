@@ -17,7 +17,6 @@ CONF_FRAMING = "framing"
 CONF_MAPPING = "mapping"
 CONF_FAILSAFE_TIMEOUT = "failsafe_timeout"
 CONF_FAILSAFE_IMPORT_LIMIT_W = "failsafe_import_limit_w"
-CONF_CONNECT_RETRY = "connect_retry"
 CONF_RETRY_INTERVAL = "retry_interval"
 
 DEFAULT_PORT = 502
@@ -31,8 +30,13 @@ FRAMING_OPTIONS = ["auto", "rtu", "tcp"]
 # out to host/port rather than listening on them. An earlier version had a
 # listen/connect toggle for the opposite arrangement; it was removed once
 # real hardware confirmed dial-out is the only arrangement needed.
-DEFAULT_CONNECT_RETRY = 300.0
-DEFAULT_RETRY_INTERVAL = 2.0
+#
+# The connection retry itself has no give-up option here (unlike the CLI's
+# sniff, a diagnostic tool that's meant to eventually stop) -- a persistent
+# HA integration should never stop trying to reach a gateway that's meant
+# to always be there, so it always retries forever, every
+# DEFAULT_RETRY_INTERVAL seconds.
+DEFAULT_RETRY_INTERVAL = 15.0
 
 # Seconds without an entity update before the fail-safe engages; <= 0 disables it.
 DEFAULT_FAILSAFE_TIMEOUT = 60

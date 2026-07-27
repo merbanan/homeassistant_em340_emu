@@ -78,7 +78,6 @@ async def test_setup_seeds_from_existing_entity_states(hass, socket_enabled):
                 "port": port,
                 "unit_id": 1,
                 "framing": "rtu",
-                "connect_retry": 5,
                 "retry_interval": 0.1,
                 "mapping": {
                     "voltage_l1": "sensor.han_voltage_l1",

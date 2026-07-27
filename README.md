@@ -53,11 +53,14 @@ between it and the Wallbox, rather than listening for the gateway to dial
 in -- every gateway actually used with this project has turned out to be
 a TCP server in its own right (check the gateway's own web UI for
 something like "Work Mode: TCP Server"). `--host`/`--port` are the
-gateway's own address, and `--connect-retry`/`--retry-interval` control
-how long and how often it keeps trying to reach it, both on first start
-and if the connection later drops (e.g. after a gateway reboot). Two wire
-formats are supported for whatever the gateway forwards from the Wallbox
-(the RS485 master):
+gateway's own address. By default it **retries forever, every 15 seconds**
+(`--retry-interval`) -- there's no good reason for a persistent service to
+ever stop trying to reach a gateway that's meant to always be there, both
+on first start and if the connection later drops (e.g. after a gateway
+reboot). Pass `--connect-retry <seconds>` to give up and exit after that
+many seconds instead, e.g. for a one-shot/scripted use. Two wire formats
+are supported for whatever the gateway forwards from the Wallbox (the
+RS485 master):
 
 * **`rtu`** -- the gateway forwards raw Modbus RTU bytes (address, function
   code, data, 2-byte CRC) unmodified. This is the common "transparent
@@ -323,9 +326,11 @@ Either way, once installed: add the integration from Settings -> Devices
 
 * **Gateway address / port** -- the RS485-to-Ethernet gateway's own
   address, since this integration dials out to it.
-* **Connect retry / retry interval** -- how long and how often to keep
-  retrying the connection, both on first setup and if it later drops
-  (e.g. to catch a gateway that only powers up when a charger starts).
+* **Retry interval** -- how often to retry the connection (default 15s),
+  both on first setup and if it later drops (e.g. to catch a gateway that
+  only powers up when a charger starts). It always retries *forever* --
+  there's no give-up option here, since a persistent integration should
+  never stop trying to reach a gateway that's meant to always be there.
 * **Unit id / framing** -- the Modbus slave id to answer as, and the wire
   framing (auto-detect works for most gateways).
 
