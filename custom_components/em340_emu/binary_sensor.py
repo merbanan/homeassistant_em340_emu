@@ -1,14 +1,17 @@
-"""Status light: green when the Wallbox is actively reading register
-values from this emulator *and* the linked P1/HAN entities are updating
-recently enough that the fail-safe hasn't had to engage; red otherwise.
+"""Status indicator: on ("connected"/healthy) while the Wallbox is
+actively reading register values from this emulator *and* the linked
+P1/HAN entities are updating recently enough that the fail-safe hasn't
+had to engage; off otherwise.
 
-Implemented as an always-on light entity (rather than a binary_sensor)
-specifically so it renders as a colored dot on a dashboard -- color is
-what communicates health here, not on/off.
+Deliberately a binary_sensor, not a light: a light entity always renders
+with an on/off toggle control (on the device page, and in any card type),
+which makes no sense for a fully-computed, read-only status -- there's
+nothing to turn on or off by hand. binary_sensor has no such service at
+all, so Home Assistant never shows a toggle for it anywhere.
 """
 from __future__ import annotations
 
-from homeassistant.components.light import ColorMode, LightEntity
+from homeassistant.components.binary_sensor import BinarySensorDeviceClass, BinarySensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
@@ -19,9 +22,6 @@ from em340_emu import ModbusGatewayServer
 from em340_emu.failsafe import FailSafeMonitor
 
 from .const import DOMAIN, signal_update
-
-GREEN = (0, 255, 0)
-RED = (255, 0, 0)
 
 # How long since the Wallbox last read a register from us before it's no
 # longer considered "actively polling". Live captures against a real
@@ -45,31 +45,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         manufacturer="Carlo Gavazzi (emulated)",
         model="EM340",
     )
-    async_add_entities([_Em340HealthLight(entry, server, monitor, device_info)])
+    async_add_entities([_Em340HealthSensor(entry, server, monitor, device_info)])
 
 
-class _Em340HealthLight(LightEntity):
+class _Em340HealthSensor(BinarySensorEntity):
     _attr_has_entity_name = True
     _attr_should_poll = False
     _attr_name = "Data flow healthy"
-    _attr_color_mode = ColorMode.RGB
-    _attr_supported_color_modes = {ColorMode.RGB}
-    _attr_is_on = True  # always lit; the color is what communicates health
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY  # "on" = connected/healthy
 
     def __init__(
         self, entry: ConfigEntry, server: ModbusGatewayServer, monitor: FailSafeMonitor, device_info: DeviceInfo
     ) -> None:
         self._server = server
         self._monitor = monitor
-        self._attr_unique_id = f"{entry.entry_id}_health_light"
+        self._attr_unique_id = f"{entry.entry_id}_data_flow_healthy"
         self._attr_device_info = device_info
         self._signal = signal_update(entry.entry_id)
 
     @property
-    def rgb_color(self) -> tuple[int, int, int]:
-        return GREEN if self._is_healthy() else RED
-
-    def _is_healthy(self) -> bool:
+    def is_on(self) -> bool:
         elapsed = self._server.seconds_since_last_request()
         wallbox_active = elapsed is not None and elapsed < WALLBOX_ACTIVITY_TIMEOUT
         return wallbox_active and not self._monitor.engaged
@@ -80,9 +75,3 @@ class _Em340HealthLight(LightEntity):
     @callback
     def _handle_update(self) -> None:
         self.async_write_ha_state()
-
-    async def async_turn_on(self, **kwargs) -> None:
-        pass  # read-only status indicator; state is fully computed
-
-    async def async_turn_off(self, **kwargs) -> None:
-        pass

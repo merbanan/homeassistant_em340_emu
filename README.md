@@ -358,34 +358,44 @@ polling and your P1/HAN mapping is actually receiving updates without
 digging through debug logs. All of these update live (no polling delay
 worse than ~2 seconds).
 
-There's also a **"Data flow healthy" light**: green while both (a) the
-Wallbox has read a register from us within the last 10 seconds (steady-
-state polling is every ~0.4-0.9s, see "Confirmed via live capture" below,
-so 10s comfortably absorbs any brief hiccup) and (b) the fail-safe hasn't
-had to engage, i.e. the P1/HAN entities are updating recently enough
-(governed by the fail-safe's own configurable timeout, default 60s -- see
-"Fail-safe" below). Red if either condition fails -- a single glance tells
-you whether the whole chain (P1 meter -> Home Assistant -> emulator ->
-Wallbox) is actually working, not just whether Home Assistant itself is up.
+There's also a **"Data flow healthy" binary sensor**: on ("connected")
+while both (a) the Wallbox has read a register from us within the last 10
+seconds (steady-state polling is every ~0.4-0.9s, see "Confirmed via live
+capture" below, so 10s comfortably absorbs any brief hiccup) and (b) the
+fail-safe hasn't had to engage, i.e. the P1/HAN entities are updating
+recently enough (governed by the fail-safe's own configurable timeout,
+default 60s -- see "Fail-safe" below). Off if either condition fails -- a
+single glance tells you whether the whole chain (P1 meter -> Home
+Assistant -> emulator -> Wallbox) is actually working, not just whether
+Home Assistant itself is up. It's a `binary_sensor`, not a `light`,
+specifically so nothing ever renders a toggle control for it -- a light
+entity always shows one (on the device page and in any card type), which
+makes no sense for a fully-computed, read-only status.
 
-The quickest way to see all of these: go to the integration's device page
-(Settings -> Devices & Services -> EM340 Modbus Emulator -> the device) --
-every entity is listed there automatically, no dashboard setup needed.
+**The default way to see all of these needs no dashboard setup at all:**
+go to the integration's device page (Settings -> Devices & Services ->
+EM340 Modbus Emulator -> the device) -- every entity, including the
+health sensor, is listed there automatically by Home Assistant itself.
 
 To pin a summary to a dashboard instead, add a manual card with something
 like:
 
 ```yaml
-type: entities
+type: glance
 title: EM340 Emulator
 entities:
-  - entity: light.em340_emulator_192_168_200_7_12345_data_flow_healthy
-  - entity: sensor.em340_emulator_192_168_200_7_12345_energy_active_import
-  - entity: sensor.em340_emulator_192_168_200_7_12345_energy_active_export
+  - entity: binary_sensor.em340_emulator_192_168_200_7_12345_data_flow_healthy
+    name: Status
+  - entity: sensor.em340_emulator_192_168_200_7_12345_active_power_total
+    name: Power
   - entity: sensor.em340_emulator_192_168_200_7_12345_current_l1
   - entity: sensor.em340_emulator_192_168_200_7_12345_current_l2
   - entity: sensor.em340_emulator_192_168_200_7_12345_current_l3
 ```
+
+`active_power_total` is a single signed value combining import and export
+(positive = importing, negative = exporting), rather than two separate
+entities.
 
 The exact entity ids depend on your config entry's title (gateway
 host:port) -- check Settings -> Devices & Services -> Entities, filter by
