@@ -1,12 +1,15 @@
-"""Health status: on ("connected") only while the Wallbox is actively
-reading registers from us AND the fail-safe hasn't had to engage due to
-stale P1/HAN data; off otherwise (see binary_sensor.py's module
-docstring). A binary_sensor specifically so no card/page ever shows a
-toggle control for it -- unlike a light, which always would."""
+"""Two independent status indicators (see binary_sensor.py's module
+docstring): "Wallbox reading" (on while the Wallbox has read a register
+from us recently) and "P1 data updating" (on while the fail-safe hasn't
+had to engage due to stale P1/HAN data). Split so a problem on either
+side is visible on its own, not collapsed into one combined state.
+binary_sensor specifically so no card/page ever shows a toggle control
+for either -- unlike a light, which always would."""
 import asyncio
 import socket
 
 import pytest
+from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from em340_emu import codec
@@ -41,10 +44,22 @@ async def _start_answering_gateway(request: bytes):
     return gateway, port, done
 
 
-def _the_health_sensor(hass):
-    sensors = hass.states.async_all("binary_sensor")
-    assert len(sensors) == 1
-    return sensors[0]
+def _find_binary_sensor(hass, unique_id_suffix: str):
+    registry = er.async_get(hass)
+    for entry in registry.entities.values():
+        if entry.domain == "binary_sensor" and entry.unique_id.endswith(unique_id_suffix):
+            state = hass.states.get(entry.entity_id)
+            assert state is not None
+            return state
+    raise AssertionError(f"no binary_sensor with unique_id suffix {unique_id_suffix!r}")
+
+
+def _wallbox_sensor(hass):
+    return _find_binary_sensor(hass, "_wallbox_reading")
+
+
+def _p1_sensor(hass):
+    return _find_binary_sensor(hass, "_p1_data_updating")
 
 
 def _free_port() -> int:
@@ -53,7 +68,7 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
-async def test_health_sensor_stays_off_when_wallbox_never_reads(hass, socket_enabled):
+async def test_wallbox_sensor_off_until_a_register_is_read(hass, socket_enabled):
     port = _free_port()  # nothing ever listens here
     entry = MockConfigEntry(
         domain=DOMAIN,
@@ -71,50 +86,59 @@ async def test_health_sensor_stays_off_when_wallbox_never_reads(hass, socket_ena
     await hass.async_block_till_done()
 
     await asyncio.sleep(2.1)  # well past a periodic refresh tick, no connection ever succeeds
-    assert _the_health_sensor(hass).state == "off"
+    assert _wallbox_sensor(hass).state == "off"
 
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
 
 
-async def test_health_sensor_on_once_wallbox_reads_off_once_failsafe_engages(hass, socket_enabled):
-    hass.states.async_set("sensor.han_power_import_l1", "0.5", {"unit_of_measurement": "kW"})
+async def test_wallbox_sensor_turns_on_once_a_register_is_read(hass, socket_enabled):
     gateway, port, done = await _start_answering_gateway(_rtu_request(1, bytes([0x03, 0x00, 0x00, 0x00, 0x02])))
     try:
         entry = MockConfigEntry(
             domain=DOMAIN,
-            data={
-                "host": "127.0.0.1",
-                "port": port,
-                "unit_id": 1,
-                "framing": "rtu",
-                "mapping": {"active_power_import_l1": "sensor.han_power_import_l1"},
-                # Long enough to survive the first (~2.1s) wait below without
-                # engaging, short enough that the second wait pushes past it
-                # -- while both stay well under binary_sensor.py's 10s
-                # Wallbox activity timeout, so that's isolated as the only
-                # variable that changes for the second assertion.
-                "failsafe_timeout": 5.0,
-                "failsafe_import_limit_w": 9000,
-            },
+            data={"host": "127.0.0.1", "port": port, "unit_id": 1, "framing": "rtu", "mapping": {}},
         )
         entry.add_to_hass(hass)
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
 
         await asyncio.wait_for(done.wait(), timeout=3)
-        await asyncio.sleep(2.1)  # let a periodic sensor-refresh tick (every 2s) pick up the change
-        assert _the_health_sensor(hass).state == "on"
-
-        # Only updates on push (should_poll=False): needs a periodic
-        # refresh tick (every 2s) to happen *after* the fail-safe actually
-        # engages at the 5s mark, not just to reach the 5s mark itself --
-        # 5.5s more (~7.6s total) comfortably covers both.
-        await asyncio.sleep(5.5)
-        assert _the_health_sensor(hass).state == "off"  # stale P1 data, even though the Wallbox read recently
+        await asyncio.sleep(2.1)  # let a periodic refresh tick (every 2s) pick up the change
+        assert _wallbox_sensor(hass).state == "on"
 
         assert await hass.config_entries.async_unload(entry.entry_id)
         await hass.async_block_till_done()
     finally:
         gateway.close()
         await gateway.wait_closed()
+
+
+async def test_p1_sensor_on_while_fresh_off_once_failsafe_engages(hass, socket_enabled):
+    hass.states.async_set("sensor.han_power_import_l1", "0.5", {"unit_of_measurement": "kW"})
+    port = _free_port()  # the Wallbox side is irrelevant to this sensor
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            "host": "127.0.0.1",
+            "port": port,
+            "unit_id": 1,
+            "framing": "rtu",
+            "mapping": {"active_power_import_l1": "sensor.han_power_import_l1"},
+            "failsafe_timeout": 0.5,
+            "failsafe_import_limit_w": 9000,
+        },
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert _p1_sensor(hass).state == "on"  # seeded from the existing entity state at setup
+
+    # Needs a periodic refresh tick (every 2s) to happen *after* the
+    # fail-safe actually engages at the 0.5s mark, not just to reach it.
+    await asyncio.sleep(2.5)
+    assert _p1_sensor(hass).state == "off"
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()

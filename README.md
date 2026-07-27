@@ -358,24 +358,32 @@ polling and your P1/HAN mapping is actually receiving updates without
 digging through debug logs. All of these update live (no polling delay
 worse than ~2 seconds).
 
-There's also a **"Data flow healthy" binary sensor**: on ("connected")
-while both (a) the Wallbox has read a register from us within the last 10
-seconds (steady-state polling is every ~0.4-0.9s, see "Confirmed via live
-capture" below, so 10s comfortably absorbs any brief hiccup) and (b) the
-fail-safe hasn't had to engage, i.e. the P1/HAN entities are updating
-recently enough (governed by the fail-safe's own configurable timeout,
-default 60s -- see "Fail-safe" below). Off if either condition fails -- a
-single glance tells you whether the whole chain (P1 meter -> Home
-Assistant -> emulator -> Wallbox) is actually working, not just whether
-Home Assistant itself is up. It's a `binary_sensor`, not a `light`,
-specifically so nothing ever renders a toggle control for it -- a light
-entity always shows one (on the device page and in any card type), which
-makes no sense for a fully-computed, read-only status.
+There are also **two binary sensors**, split so a problem on either side
+of the chain is visible on its own instead of collapsing into one
+combined "unhealthy" state:
+
+* **"Wallbox reading"** -- on while the Wallbox has read a register from
+  us within the last 10 seconds (steady-state polling is every ~0.4-0.9s,
+  see "Confirmed via live capture" below, so 10s comfortably absorbs any
+  brief hiccup).
+* **"P1 data updating"** -- on while the fail-safe hasn't had to engage,
+  i.e. the P1/HAN entities are updating recently enough (governed by the
+  fail-safe's own configurable timeout, default 60s -- see "Fail-safe"
+  below).
+
+Both together cover the whole chain (P1 meter -> Home Assistant ->
+emulator -> Wallbox): if "Wallbox reading" is off, the Wallbox/gateway
+side has a problem; if "P1 data updating" is off, the P1/HAN source side
+does, independent of whether the Wallbox is still happily reading stale
+values. Both are `binary_sensor`, not `light`, specifically so nothing
+ever renders a toggle control for them -- a light entity always shows
+one (on the device page and in any card type), which makes no sense for
+a fully-computed, read-only status.
 
 **The default way to see all of these needs no dashboard setup at all:**
 go to the integration's device page (Settings -> Devices & Services ->
-EM340 Modbus Emulator -> the device) -- every entity, including the
-health sensor, is listed there automatically by Home Assistant itself.
+EM340 Modbus Emulator -> the device) -- every entity, including both
+status sensors, is listed there automatically by Home Assistant itself.
 
 To pin a summary to a dashboard instead, add a manual card with something
 like:
@@ -384,8 +392,10 @@ like:
 type: glance
 title: EM340 Emulator
 entities:
-  - entity: binary_sensor.em340_emulator_192_168_200_7_12345_data_flow_healthy
-    name: Status
+  - entity: binary_sensor.em340_emulator_192_168_200_7_12345_wallbox_reading
+    name: Wallbox
+  - entity: binary_sensor.em340_emulator_192_168_200_7_12345_p1_data_updating
+    name: P1 meter
   - entity: sensor.em340_emulator_192_168_200_7_12345_active_power_total
     name: Power
   - entity: sensor.em340_emulator_192_168_200_7_12345_current_l1
